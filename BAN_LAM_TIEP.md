@@ -259,6 +259,31 @@ select count(distinct anime_id) from streaming_links where kind='free_legal' and
 select count(*) from streaming_links where kind='free_legal' and is_verified;
 ```
 
+**Kiểm xem bộ nào bị gán sai tập** (công cụ mới, không cần key YouTube):
+
+```bash
+python3 -m ingest.audit                 # chỉ đọc, in báo cáo theo từng bộ
+python3 -m ingest.audit --slug one-punch-man
+```
+
+Nó lấy lại **tiêu đề thật** của từng video qua oEmbed công khai, parse lại bằng
+`parse_title` mới, rồi xếp mỗi link vào 4 nhóm:
+
+| Nhóm | Nghĩa | `--fix` làm gì |
+|---|---|---|
+| `xoa` | tiêu đề không nhận dạng được / bản gộp **một phần** | xoá link |
+| `gop_ca_bo` | là **bản gộp cả bộ** nhưng đang lưu thành tập N | sửa `episode_number = 0` |
+| `sai_so_tap` | tiêu đề nói tập khác | sửa số tập |
+| `vuot_tong` | tập > `episodes_total` của AniList → **nghi link thuộc bộ/mùa khác** | báo ra, chỉ xoá khi thêm `--prune-over-total` |
+
+```bash
+python3 -m ingest.audit --fix                      # lưu source_title + sửa/xoá
+python3 -m ingest.audit --fix --prune-over-total   # xoá luôn link vượt tổng
+```
+
+`--fix` cũng lưu `source_title` cho toàn bộ link cũ, nên lần sau audit chạy nhanh
+và không cần gọi mạng.
+
 **Sau lần chạy ĐẦU TIÊN bằng bản mới — dọn link cũ bị gán sai tập** (vd video gộp
 `Tập 01-24` từng bị lưu thành tập 1). Bản mới lưu `source_title` cho mọi link, nên
 dòng **không có** `source_title` chính là dòng do bản cũ tạo ra:

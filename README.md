@@ -38,6 +38,7 @@
 ├── db/migrations/            bản vá idempotent cho DB đã tạo trước đó
 ├── CHECKLIST_QA.md           ⭐ 6 điểm kiểm tra APK release trên máy thật
 ├── ingest/                   worker: AniList + YouTube official → Supabase
+│   └── audit.py              `python3 -m ingest.audit` — soi link gán sai số tập
 ├── supabase/                 Edge Functions: home · search · schedule · anime · push
 ├── app/                      Flutter app (lib/ 20 file) + platform folders đã sẵn
 │   ├── UI_PREVIEW.html       ⭐ xem trước 3 màn hình (poster thật, offline)

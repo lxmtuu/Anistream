@@ -120,6 +120,31 @@ class DB:
             raise RuntimeError(f"patch {table} lỗi {r.status_code}: {r.text[:300]}")
         return 1
 
+    def delete(self, table: str, filters: Dict[str, Any]) -> int:
+        """DELETE theo bộ lọc (PostgREST). Dùng cho `ingest.audit` dọn link sai.
+
+        Nguy hiểm nên CỐ Ý không cho xoá cả bảng: bắt buộc có ít nhất 1 bộ lọc.
+        """
+        if not filters:
+            raise RuntimeError("delete(): phải có bộ lọc (không xoá cả bảng)")
+        if self.dry:
+            print(f"  [dry-run] delete {table} {filters}")
+            return 0
+        params = {k: f"eq.{v}" for k, v in filters.items()}
+        r = requests.delete(
+            f"{self.url}/rest/v1/{table}",
+            params=params,
+            headers={
+                "apikey": self.key,
+                "Authorization": f"Bearer {self.key}",
+                "Prefer": "return=minimal",
+            },
+            timeout=config.HTTP_TIMEOUT,
+        )
+        if r.status_code not in (200, 204):
+            raise RuntimeError(f"delete {table} lỗi {r.status_code}: {r.text[:300]}")
+        return 1
+
     def select(self, table: str, query: str) -> List[Dict]:
         if self.dry:
             return []
