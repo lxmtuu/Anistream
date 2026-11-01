@@ -112,6 +112,9 @@ class FakeDB:
         self.queries.append(query)
         return list(self.rows)
 
+    def select_all(self, table, query, page_size=1000, max_rows=200000):
+        return self.select(table, query)
+
     def patch(self, table, filters, values):
         self.patches.append((table, filters, values))
         return 1

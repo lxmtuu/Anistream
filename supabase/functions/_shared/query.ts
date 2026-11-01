@@ -61,3 +61,36 @@ export function isRangeNotSatisfiable(
 export function ilikeSafe(q: string): string {
   return q.replace(/[%_\\]/g, (c) => `\\${c}`).slice(0, 60);
 }
+
+/**
+ * Supabase/PostgREST cắt MỌI response ở "Max Rows" (mặc định 1000) — `.limit(1200)`
+ * vẫn chỉ trả 1000 dòng. Với danh sách tập/link của ~60 bộ thì 1000 dòng là quá
+ * ít: bộ nằm sau dòng 1000 sẽ hiện 0 tập dù dữ liệu có thật.
+ */
+export const MAX_ROWS = 1000;
+
+/**
+ * Đọc hết các trang cho tới khi gặp trang ngắn.
+ *
+ * `make(from, to)` phải dựng query có `.order(...)` ỔN ĐỊNH (khoá duy nhất), nếu
+ * không các trang có thể chồng nhau/thiếu dòng.
+ */
+export async function selectAll<T>(
+  // Kiểu để lỏng (`unknown`) vì PostgREST trả union success/failure — ép kiểu
+  // chặt ở đây chỉ làm TypeScript cãi nhau mà không thêm an toàn.
+  make: (from: number, to: number) => PromiseLike<unknown>,
+  maxRows = 5000,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; from < maxRows; from += MAX_ROWS) {
+    const res = (await make(from, from + MAX_ROWS - 1)) as {
+      data?: T[] | null;
+      error?: { message?: string } | null;
+    };
+    if (res?.error) throw new Error(res.error.message ?? "query lỗi");
+    const rows = res?.data ?? [];
+    out.push(...rows);
+    if (rows.length < MAX_ROWS) break;
+  }
+  return out;
+}

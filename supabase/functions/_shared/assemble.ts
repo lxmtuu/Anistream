@@ -125,9 +125,15 @@ export function toAnimeDto(
   const freeLinks = verified.filter((l) => l.kind === "free_legal");
   const officialLinks = verified.filter((l) => l.kind === "official");
 
-  // video_id theo số tập (0 = full bộ)
+  // video_id theo số tập (0 = full bộ).
+  // Thứ tự `links` do PostgREST trả về KHÔNG xác định → nếu một tập có cả bản VN
+  // và bản Asia (Ani-One), ai "thắng" là ngẫu nhiên. Ưu tiên region VN trước.
+  const regionRank = (r?: string | null) => (r === "VN" ? 0 : r === "AS" ? 1 : 2);
+  const orderedFree = [...freeLinks].sort(
+    (a, b) => regionRank(a.region) - regionRank(b.region),
+  );
   const videoByEpisode = new Map<number, { id: string; platform: string }>();
-  for (const l of freeLinks) {
+  for (const l of orderedFree) {
     const vid = l.platform === "youtube" ? youtubeId(l.url) : null;
     if (vid && !videoByEpisode.has(l.episode_number)) {
       videoByEpisode.set(l.episode_number, { id: vid, platform: l.platform });

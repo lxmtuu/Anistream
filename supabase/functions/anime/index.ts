@@ -16,7 +16,7 @@ import {
   LinkRow,
   toAnimeDto,
 } from "../_shared/assemble.ts";
-import { toInt } from "../_shared/query.ts";
+import { selectAll, toInt } from "../_shared/query.ts";
 
 const CARD_COLUMNS =
   "id, slug, title_romaji, title_english, title_vi, title_native, cover_url, " +
@@ -45,28 +45,29 @@ Deno.serve(
     if (rows.length === 0) return fail("not_found", "Không tìm thấy anime");
     const row = rows[0];
 
-    const [epRes, linkRes] = await Promise.all([
-      sb
-        .from("episodes")
-        .select("anime_id, number, title, airing_at")
-        .eq("anime_id", row.id)
-        .order("number", { ascending: true })
-        .limit(600),
-      sb
-        .from("streaming_links")
-        .select("anime_id, episode_number, platform, region, url, kind, is_verified")
-        .eq("anime_id", row.id)
-        .eq("is_verified", true)
-        .limit(600),
+    // `limit(600)` bị PostgREST cắt ở 1000 dòng của CẢ response, nhưng với bộ dài
+    // (One Piece, Fairy Tail) vẫn có thể thiếu tập → đọc hết bằng selectAll.
+    const [episodeRows, linkRows] = await Promise.all([
+      selectAll<EpisodeRow>((from, to) =>
+        sb
+          .from("episodes")
+          .select("anime_id, number, title, airing_at")
+          .eq("anime_id", row.id)
+          .order("number", { ascending: true })
+          .range(from, to)
+      ),
+      selectAll<LinkRow>((from, to) =>
+        sb
+          .from("streaming_links")
+          .select("anime_id, episode_number, platform, region, url, kind, is_verified")
+          .eq("anime_id", row.id)
+          .eq("is_verified", true)
+          .order("episode_number", { ascending: true })
+          .range(from, to)
+      ),
     ]);
-    if (epRes.error) throw new Error(epRes.error.message);
-    if (linkRes.error) throw new Error(linkRes.error.message);
 
-    const detail = toAnimeDto(
-      row,
-      (epRes.data ?? []) as EpisodeRow[],
-      (linkRes.data ?? []) as LinkRow[],
-    );
+    const detail = toAnimeDto(row, episodeRows, linkRows);
 
     // ── liên quan: cùng thể loại, ưu tiên điểm cao ──
     const relatedGenre = detail.genres[0];

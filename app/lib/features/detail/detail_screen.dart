@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/theme.dart';
 import '../../core/models/anime.dart';
+import '../../core/models/episode_count.dart';
 import '../../core/models/episode_title.dart';
 import '../../core/models/genre_vi.dart';
 import '../../core/widgets/net_image.dart';
@@ -91,7 +92,12 @@ class _DetailBody extends ConsumerWidget {
     // Danh sách tập đến từ 2 nguồn: lịch phát TMDB/AniList (biết đủ số tập)
     // và link YouTube official (chỉ một phần tập có bản phát). Hiện cả hai con
     // số để người dùng không bấm nhầm vào tập chưa phát được.
-    final playableCount = anime.episodes.where((e) => e.playable).length;
+    // Entry `number == 0` là "bản gộp cả bộ" → KHÔNG tính vào số tập (nếu tính,
+    // bộ 12 tập hiện "Tập phim (13)"). Xem core/models/episode_count.dart.
+    final realCount = realEpisodeCount(anime.episodes.map((e) => e.number));
+    final playableCount =
+        anime.episodes.where((e) => e.playable && e.number > 0).length;
+    final hasBulk = anime.episodes.any((e) => e.playable && e.number == 0);
 
     return CustomScrollView(
       slivers: [
@@ -319,22 +325,19 @@ class _DetailBody extends ConsumerWidget {
                     spacing: 8,
                     children: [
                       Text(
-                        'Tập phim (${anime.episodes.length})',
+                        episodesHeaderLabel(realCount),
                         style: const TextStyle(
                             fontSize: 14, fontWeight: FontWeight.w700),
                       ),
-                      if (playableCount > 0)
-                        Text(
-                          '· $playableCount tập xem được',
-                          style: const TextStyle(
-                              fontSize: 11.5, color: AppTheme.green),
-                        )
-                      else
-                        const Text(
-                          '· chưa có bản phát miễn phí',
-                          style: TextStyle(
-                              fontSize: 11.5, color: AppTheme.muted),
+                      Text(
+                        watchableSuffix(playableCount, hasBulk: hasBulk),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: playableCount > 0 || hasBulk
+                              ? AppTheme.green
+                              : AppTheme.muted,
                         ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 10),

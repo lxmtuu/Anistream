@@ -22,7 +22,7 @@ import re
 import sys
 import time
 
-from . import anilist, config, db as dbmod, jikan, match, tmdb, youtube
+from . import anilist, config, db as dbmod, jikan, match, qa, tmdb, youtube
 
 
 # ─────────────────────────────────────────────── helpers
@@ -259,8 +259,9 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
             print(f"      - {name}  ({cnt} video)")
 
     # Link đã ghi xong → biến chúng thành tập hiển thị được (bộ 0 tập vì không
-    # khớp TMDB sẽ có danh sách tập thật).
-    total_links += job_link_episodes(DB)
+    # khớp TMDB sẽ có danh sách tập thật). KHÔNG cộng vào `total_links`: số tập
+    # không phải số link, cộng vào sẽ làm `ingest_runs.rows` của job C sai.
+    job_link_episodes(DB)
 
     ok = not failures
     DB.log_ingest("youtube", "links", ok, total_links,
@@ -299,21 +300,21 @@ def job_link_episodes(DB, limit: int = 20000):
         print("  [dry-run] cần Supabase để đọc link → bỏ qua")
         return 0
 
-    links = DB.select(
+    # select_all: PostgREST cắt ở 1000 dòng, xin limit=20000 cũng chỉ được 1000.
+    links = DB.select_all(
         "streaming_links",
-        "select=anime_id,episode_number&kind=eq.free_legal"
-        f"&episode_number=gt.0&limit={int(limit)}",
+        "select=anime_id,episode_number&kind=eq.free_legal&episode_number=gt.0",
     )
     if not links:
         print("  · không có link nào có số tập")
         return 0
 
     totals = {r["id"]: r.get("episodes_total")
-              for r in DB.select("anime", "select=id,episodes_total&limit=5000")}
+              for r in DB.select_all("anime", "select=id,episodes_total")}
     slugs = {r["id"]: r.get("slug")
-             for r in DB.select("anime", "select=id,slug&limit=5000")}
+             for r in DB.select_all("anime", "select=id,slug")}
     existing = {r["anime_id"] for r in
-                DB.select("episodes", f"select=anime_id&limit={int(limit)}")}
+                DB.select_all("episodes", "select=anime_id")}
 
     by_anime = {}
     for l in links:
@@ -541,7 +542,7 @@ def job_seasons(DB, limit: int = 80):
 
     # `known` phải là TOÀN BỘ bảng, không chỉ trang này: nếu chỉ lấy id trong
     # trang thì mùa đã có sẵn (nằm ngoài top `limit`) bị báo nhầm là "mùa mới".
-    all_rows = DB.select("anime", "select=anilist_id&anilist_id=not.is.null&limit=5000")
+    all_rows = DB.select_all("anime", "select=anilist_id&anilist_id=not.is.null")
     known = {r["anilist_id"] for r in all_rows if r.get("anilist_id")}
     known |= {r["anilist_id"] for r in rows if r.get("anilist_id")}
     added, seen, failures = [], set(), 0
@@ -596,12 +597,16 @@ def job_seasons(DB, limit: int = 80):
 
 
 # ─────────────────────────────────────────────── Job F
-def job_jikan(DB, limit: int = 40, only_airing: bool = False):
+def job_jikan(DB, limit: int = 40, only_airing: bool = False,
+              fill_gaps: bool = False):
     """Lấp danh sách tập còn THIẾU bằng Jikan (MyAnimeList).
 
     Vì sao cần: AniList chỉ có tổng số tập; TMDB đôi khi thiếu/lệch mùa. Jikan có
     `title` + `aired` cho từng tập, miễn phí và không cần key, lại dùng đúng
     `mal_id` mà AniList đã trả (`idMal`) nên không phải đoán tên.
+
+    `fill_gaps=False` (mặc định) chỉ lấp bộ **chưa có tập nào**. Bộ thiếu VÀI tập
+    (đo 01/11/2026: 33 bộ) trước đây không bao giờ được lấp — dùng `--fill-gaps`.
     """
     print("\n▶ Job F — Jikan (MAL): lấp danh sách tập còn thiếu")
     cols = "id, slug, title_romaji, mal_id, episodes_total, status"
@@ -615,13 +620,21 @@ def job_jikan(DB, limit: int = 40, only_airing: bool = False):
     filled = written = skipped = errors = 0
     for i, row in enumerate(rows, 1):
         try:
-            have = DB.select("episodes",
-                             f"select=number&anime_id=eq.{row['id']}&limit=1")
-            if have:
+            have_rows = DB.select(
+                "episodes", f"select=number&anime_id=eq.{row['id']}&limit=600")
+            have = {e.get("number") for e in have_rows if e.get("number") is not None}
+            total = row.get("episodes_total")
+            if have and not fill_gaps:
                 skipped += 1
                 continue                      # đã có danh sách tập → không đụng
+            if have and isinstance(total, int) and total > 0 and len(have) >= total:
+                skipped += 1
+                continue                      # đã đủ → không gọi API
             items = jikan.episodes(row["mal_id"])
-            eps = jikan.episode_rows(row["id"], items, row.get("episodes_total"))
+            eps = jikan.episode_rows(row["id"], items, total)
+            if have:
+                # Chỉ THÊM tập còn thiếu — không ghi đè tên/lịch TMDB đã có.
+                eps = [e for e in eps if e["number"] not in have]
             if not eps:
                 print(f"  ! {row['slug'][:40]}: Jikan không có tập nào dùng được")
                 continue
@@ -641,16 +654,41 @@ def job_jikan(DB, limit: int = 40, only_airing: bool = False):
     DB.log_ingest("jikan", "episodes", ok, written,
                   error=f"{errors} bộ lỗi" if errors else "")
     print(f"  ✓ {filled} bộ được lấp · {written} tập · "
-          f"{skipped} bộ đã có tập (bỏ qua)"
+          f"{skipped} bộ đã đủ/đã có tập (bỏ qua)"
           + (f" · {errors} lỗi" if errors else ""))
     return written
+
+
+# ─────────────────────────────────────────────── Job G
+def job_check(DB, strict: bool = True):
+    """Kiểm bất biến dữ liệu sau khi ingest (xem `ingest/qa.py`).
+
+    Chạy cuối mọi lần `all`/cron hằng ngày. Vi phạm CỨNG (tập vượt tổng, slug
+    trùng, một URL gắn 2 bộ…) làm job ĐỎ — vì "cron xanh mà dữ liệu sai" đúng là
+    kiểu hỏng tệ nhất. Thiếu nội dung (link vượt tổng, bộ 0 tập) chỉ cảnh báo.
+    """
+    print("\n▶ Job G — kiểm bất biến dữ liệu")
+    if DB.dry:
+        print("  [dry-run] cần Supabase để kiểm → bỏ qua")
+        return 0
+    v = qa.collect(DB)
+    print(qa.report(v))
+    n_hard = sum(len(x) for x in v["hard"].values())
+    DB.log_ingest("qa", "check", not qa.has_hard(v), n_hard,
+                  error="; ".join(f"{k}:{len(x)}" for k, x in v["hard"].items())[:400])
+    if qa.has_hard(v) and strict:
+        raise RuntimeError(
+            f"{n_hard} vi phạm cứng trong dữ liệu — xem log phía trên")
+    print(f"  ✓ {n_hard} vi phạm cứng" if n_hard else "  ✓ dữ liệu nhất quán")
+    return n_hard
 
 
 # ─────────────────────────────────────────────── CLI
 def main(argv=None):
     ap = argparse.ArgumentParser(description="AniStream ingest worker")
     ap.add_argument("command", choices=["schedule", "catalog", "youtube", "tmdb",
-                                        "seasons", "jikan", "episodes", "all"])
+                                        "seasons", "jikan", "episodes",
+                                        "check", "all"])
     ap.add_argument("--hours", type=int, default=26)
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--limit", type=int, default=25, help="số video mỗi kênh")
@@ -669,6 +707,10 @@ def main(argv=None):
                     help="số anime lấp danh sách tập từ Jikan mỗi lần")
     ap.add_argument("--only-airing", action="store_true",
                     help="job jikan: chỉ xử lý bộ đang chiếu")
+    ap.add_argument("--fill-gaps", action="store_true",
+                    help="job jikan: lấp cả bộ THIẾU VÀI TẬP (không chỉ bộ 0 tập)")
+    ap.add_argument("--no-strict", action="store_true",
+                    help="job check: chỉ cảnh báo, không làm đỏ job")
     ap.add_argument("--no-cache", action="store_true",
                     help="bỏ qua .cache/match_cache.json (ghép lại tên từ đầu)")
     ap.add_argument("--channel", default="",
@@ -706,9 +748,11 @@ def main(argv=None):
         if args.command == "seasons":
             total += job_seasons(DB, args.limit_seasons)
         if args.command == "jikan":
-            total += job_jikan(DB, args.limit_jikan, args.only_airing)
+            total += job_jikan(DB, args.limit_jikan, args.only_airing, args.fill_gaps)
         if args.command == "episodes":
             total += job_link_episodes(DB)
+        if args.command == "check":
+            total += job_check(DB, strict=not args.no_strict)
         if args.command == "all":
             # Job D cần key; job E/F thì không → thiếu key TMDB KHÔNG được chặn E/F.
             if tmdb.is_configured():
@@ -720,8 +764,9 @@ def main(argv=None):
                       "tên/tóm tắt tiếng Việt và danh sách tập sẽ không được bổ sung.")
                 DB.log_ingest("tmdb", "enrich", False, 0, "thiếu TMDB_API_KEY")
             total += job_seasons(DB, args.limit_seasons)
-            total += job_jikan(DB, args.limit_jikan)
+            total += job_jikan(DB, args.limit_jikan, fill_gaps=True)
             total += job_link_episodes(DB)
+            total += job_check(DB, strict=not args.no_strict)
     except KeyboardInterrupt:
         print("\n… dừng theo yêu cầu")
         return 130

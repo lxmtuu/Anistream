@@ -25,6 +25,9 @@ class FakeDB:
         self.queries.append((table, query))
         return list(self.rows)
 
+    def select_all(self, table, query, page_size=1000, max_rows=200000):
+        return self.select(table, query)
+
     def upsert(self, table, rows, on_conflict=None, fallback_per_row=False):
         self.upserted.append((table, list(rows)))
         out = []

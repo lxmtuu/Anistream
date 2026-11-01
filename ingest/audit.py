@@ -171,8 +171,8 @@ def load_links(DB, slug: str = "", limit: int = 0, region: str = "") -> List[Dic
 
 def count_other_regions(DB, keep: str) -> int:
     """Số link của kênh KHÁC (dùng để báo trước khi xoá)."""
-    rows = DB.select("streaming_links",
-                     "select=id&kind=eq.free_legal&region=neq." + keep + "&limit=1000")
+    rows = DB.select_all("streaming_links",
+                         "select=id&kind=eq.free_legal&region=neq." + keep)
     return len(rows)
 
 
@@ -277,9 +277,8 @@ def run(DB, slug: str = "", limit: int = 0, fix: bool = False,
                   f"chỉ giữ kênh {channel or region}")
             # Lấy id rồi xoá từng dòng (PostgREST không có DELETE … WHERE IN qua
             # query string an toàn; số lượng nhỏ nên xoá từng dòng là ổn)
-            extra = DB.select("streaming_links",
-                              f"select=id&kind=eq.free_legal&region=neq.{region}"
-                              f"&limit=1000")
+            extra = DB.select_all("streaming_links",
+                                  f"select=id&kind=eq.free_legal&region=neq.{region}")
             for r in extra:
                 DB.delete("streaming_links", {"id": r["id"]})
             print(f"  ✓ đã xoá {len(extra)} link kênh khác")

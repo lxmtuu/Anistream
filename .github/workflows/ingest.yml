@@ -72,7 +72,7 @@ jobs:
       # → tìm MÙA MỚI qua quan hệ SEQUEL → lấp danh sách tập còn thiếu bằng Jikan.
       # Trước đây chỉ có `tmdb` (chế độ bổ sung) nên tập mới của bộ đang chiếu
       # KHÔNG BAO GIỜ được cập nhật.
-      - name: Job C'/D/E/F hằng ngày (chỉ khi cron 20:40 hoặc dispatch "all")
+      - name: Job C'/D/E/F/G hằng ngày (chỉ khi cron 20:40 hoặc dispatch "all")
         if: github.event.schedule == '40 20 * * *' || github.event.inputs.command == 'all'
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
@@ -85,4 +85,6 @@ jobs:
           python -m ingest.main seasons --limit-seasons 120
           python -m ingest.main jikan --limit-jikan 60
           python -m ingest.main episodes
+          # Job G: kiểm bất biến dữ liệu — vi phạm cứng thì ĐỎ, không im lặng.
+          python -m ingest.main check
 

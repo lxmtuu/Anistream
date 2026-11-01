@@ -53,7 +53,8 @@ class TestEpisodeRows(unittest.TestCase):
 
     def test_ten_placeholder_thanh_none(self):
         rows = jikan.episode_rows(7, self.ITEMS, episodes_total=12)
-        self.assertIsNone(rows[0]["title"], "'Episode 1' là placeholder")
+        # Placeholder → KHÔNG có khoá title (gửi None sẽ xoá tên thật khi upsert)
+        self.assertNotIn("title", rows[0], "'Episode 1' là placeholder")
         self.assertEqual(rows[1]["title"], "Tập hai")
 
     def test_khong_biet_tong_thi_khong_cat(self):

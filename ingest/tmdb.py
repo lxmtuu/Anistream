@@ -287,13 +287,18 @@ def episode_rows(
         air = e.get("air_date")
         if not air:
             continue                      # chưa có ngày chiếu → đừng bịa
-        out.append({
+        row = {
             "anime_id": anime_id,
             "number": num,
-            "title": clean_episode_title(e.get("name")),
             "airing_at": dt.datetime.fromisoformat(air).replace(
                 tzinfo=dt.timezone.utc).isoformat(),
-        })
+        }
+        # Tên placeholder ("Episode 7") → KHÔNG gửi khoá `title`. Gửi None sẽ
+        # ghi NULL đè lên tên thật do Jikan điền (upsert merge-duplicates).
+        title = clean_episode_title(e.get("name"))
+        if title:
+            row["title"] = title
+        out.append(row)
     out.sort(key=lambda r: r["number"])
     return out
 

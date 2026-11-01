@@ -117,12 +117,14 @@ def episode_rows(
             continue
         if episodes_total and num > int(episodes_total):
             continue
-        out.append({
-            "anime_id": anime_id,
-            "number": num,
-            "title": clean_episode_title(e.get("title")),
-            "airing_at": parse_aired(e.get("aired")),
-        })
+        row = {"anime_id": anime_id, "number": num}
+        title = clean_episode_title(e.get("title"))
+        if title:
+            row["title"] = title          # placeholder → bỏ khoá, không ghi NULL
+        aired = parse_aired(e.get("aired"))
+        if aired:
+            row["airing_at"] = aired
+        out.append(row)
     out.sort(key=lambda r: r["number"])
     return out
 

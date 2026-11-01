@@ -66,3 +66,20 @@ test("is_free = có link free_legal đã verify", () => {
   assert.equal(toAnimeDto(ROW, [], [link(1)]).is_free, true);
   assert.equal(toAnimeDto(ROW, [], []).is_free, false);
 });
+
+test("cùng 1 tập có bản VN và bản AS → ưu tiên VN (không phụ thuộc thứ tự DB)", () => {
+  const vn = { ...link(1), region: "VN", url: `https://www.youtube.com/watch?v=${"V".repeat(11)}` };
+  const asia = { ...link(1), region: "AS", url: `https://www.youtube.com/watch?v=${"A".repeat(11)}` };
+  const episodes = [{ anime_id: 1, number: 1, title: "", airing_at: null }];
+
+  const dto1 = toAnimeDto(ROW, episodes, [asia, vn]);
+  const dto2 = toAnimeDto(ROW, episodes, [vn, asia]);
+  assert.equal(dto1.episodes[0].video_id, "V".repeat(11));
+  assert.equal(dto2.episodes[0].video_id, "V".repeat(11), "đảo thứ tự vẫn phải ra VN");
+});
+
+test("chỉ có bản AS thì dùng AS (không bỏ trống)", () => {
+  const asia = { ...link(1), region: "AS", url: `https://www.youtube.com/watch?v=${"A".repeat(11)}` };
+  const dto = toAnimeDto(ROW, [{ anime_id: 1, number: 1, title: "", airing_at: null }], [asia]);
+  assert.equal(dto.episodes[0].video_id, "A".repeat(11));
+});

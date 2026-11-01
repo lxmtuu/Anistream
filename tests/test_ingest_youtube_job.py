@@ -42,6 +42,9 @@ class FakeDB:
     def select(self, table, query):
         return []
 
+    def select_all(self, table, query, page_size=1000, max_rows=200000):
+        return []
+
     def log_ingest(self, source, job, ok, rows, error=""):
         self.logs.append((source, job, ok, rows, error))
 

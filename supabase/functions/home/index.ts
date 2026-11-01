@@ -17,7 +17,7 @@ import {
   shelf,
   toAnimeDto,
 } from "../_shared/assemble.ts";
-import { currentSeason } from "../_shared/query.ts";
+import { currentSeason, selectAll } from "../_shared/query.ts";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -38,7 +38,8 @@ Deno.serve(
         .from("episodes")
         .select("anime_id, number, airing_at")
         .gte("airing_at", recentIso)
-        .order("airing_at", { ascending: true })
+        // giảm dần để 40 dòng là 40 tập MỚI nhất (tăng dần sẽ cắt mất tập mới)
+        .order("airing_at", { ascending: false })
         .limit(40),
 
       sb
@@ -57,12 +58,15 @@ Deno.serve(
         .order("score", { ascending: false, nullsFirst: false })
         .limit(20),
 
+      // KHÔNG đặt limit thấp ở đây: DB đã có 485 link free_legal, `limit(300)`
+      // khiến vài bộ miễn phí biến mất khỏi shelf "Xem ngay" một cách ngẫu nhiên.
       sb
         .from("streaming_links")
         .select("anime_id")
         .eq("kind", "free_legal")
         .eq("is_verified", true)
-        .limit(300),
+        .order("anime_id", { ascending: true })
+        .limit(2000),
 
       sb
         .from("episodes")
@@ -116,29 +120,36 @@ Deno.serve(
     }
 
     // ── 3. lấy dữ liệu đầy đủ cho các anime đó (3 query song song) ──
-    const [animeRes, epRes, linkRes] = await Promise.all([
+    // `limit(1200)` thực tế chỉ trả 1000 dòng (PostgREST Max Rows) → bộ nằm sau
+    // dòng 1000 hiện 0 tập. `selectAll` tự đọc hết trang; order phải ỔN ĐỊNH.
+    const [animeRes, episodeRows, linkRows] = await Promise.all([
       sb.from("anime").select("*").in("id", ids),
-      sb
-        .from("episodes")
-        .select("anime_id, number, title, airing_at")
-        .in("anime_id", ids)
-        .order("number", { ascending: true })
-        .limit(1200),
-      sb
-        .from("streaming_links")
-        .select("anime_id, episode_number, platform, region, url, kind, is_verified")
-        .in("anime_id", ids)
-        .eq("is_verified", true)
-        .limit(1200),
+      selectAll<EpisodeRow>((from, to) =>
+        sb
+          .from("episodes")
+          .select("anime_id, number, title, airing_at")
+          .in("anime_id", ids)
+          .order("anime_id", { ascending: true })
+          .order("number", { ascending: true })
+          .range(from, to)
+      ),
+      selectAll<LinkRow>((from, to) =>
+        sb
+          .from("streaming_links")
+          .select("anime_id, episode_number, platform, region, url, kind, is_verified")
+          .in("anime_id", ids)
+          .eq("is_verified", true)
+          .order("anime_id", { ascending: true })
+          .order("episode_number", { ascending: true })
+          .range(from, to)
+      ),
     ]);
 
-    for (const [name, res] of Object.entries({ animeRes, epRes, linkRes })) {
-      if (res.error) throw new Error(`${name}: ${res.error.message}`);
-    }
+    if (animeRes.error) throw new Error(`anime: ${animeRes.error.message}`);
 
     const animeRows = (animeRes.data ?? []) as AnimeRow[];
-    const epsByAnime = groupByAnime((epRes.data ?? []) as EpisodeRow[]);
-    const linksByAnime = groupByAnime((linkRes.data ?? []) as LinkRow[]);
+    const epsByAnime = groupByAnime(episodeRows);
+    const linksByAnime = groupByAnime(linkRows);
 
     // sắp xếp theo mức phổ biến để shelf "xem ngay" có bộ hot trước
     animeRows.sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0));

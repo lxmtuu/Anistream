@@ -5,6 +5,7 @@ Không dùng SDK để giữ dependency nhẹ (chỉ cần `requests`).
 Khi SUPABASE_URL/SERVICE_KEY trống hoặc DRY_RUN=1 → chỉ in ra số liệu, không ghi.
 """
 import datetime as dt
+import re
 from typing import Iterable, Dict, List, Any
 
 import requests
@@ -155,6 +156,32 @@ class DB:
         )
         r.raise_for_status()
         return r.json()
+
+    # PostgREST "Max Rows" của Supabase mặc định = 1000. Xin `limit=5000` vẫn chỉ
+    # nhận 1000 dòng đầu → mọi chỗ đọc hàng loạt phải tự phân trang.
+    PAGE = 1000
+
+    def select_all(self, table: str, query: str, page_size: int = PAGE,
+                   max_rows: int = 200_000) -> List[Dict]:
+        """Đọc TOÀN BỘ row khớp `query`, tự phân trang bằng limit/offset.
+
+        Vì sao cần: `select("episodes", "…&limit=20000")` KHÔNG trả 20000 dòng —
+        Supabase cắt ở Max Rows (1000). Khi bảng `episodes` vượt 1000 dòng, job C'
+        coi mọi bộ nằm sau dòng 1000 là "chưa có tập" và job E bỏ sót bộ đã có
+        trong `known` (báo nhầm "mùa mới"). Hỏng ÂM THẦM nên phải sửa tận gốc.
+        """
+        if self.dry:
+            return []
+        base = re.sub(r"&?(limit|offset)=\d+", "", query or "").strip("&")
+        out: List[Dict] = []
+        offset = 0
+        while offset < max_rows:
+            batch = self.select(table, f"{base}&limit={int(page_size)}&offset={offset}")
+            out.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+        return out
 
     def log_ingest(self, source: str, job: str, ok: bool, rows: int, error: str = ""):
         """Ghi audit vào ingest_runs — để biết cron có chạy hay không.

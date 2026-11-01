@@ -217,11 +217,32 @@ def slugify(text: str, fallback_id: int) -> str:
     return s or f"anime-{fallback_id}"
 
 
+# Khoá BẮT BUỘC phải có trong payload (NOT NULL ở DB, hoặc giá trị 0/rỗng là hợp lệ).
+_KEEP_EMPTY = {"anilist_id", "slug", "title_romaji", "source", "popularity", "genres"}
+
+
+def _drop_empty(row: Dict) -> Dict:
+    """Bỏ khoá rỗng/None khỏi payload upsert.
+
+    Vì sao: PostgREST `Prefer: resolution=merge-duplicates` ghi ĐÈ mọi cột có mặt
+    trong payload. `to_anime_row` gửi `episodes_total`, `cover_url`, `score`…
+    kể cả khi AniList trả `null` → mỗi lần job A/B chạy (30 phút/lần) là một lần
+    XOÁ số tập / ảnh bìa mà TMDB vừa điền. Đo 01/11/2026: 8 bộ có 12–13 tập
+    nhưng `episodes_total` = NULL, và cả 126 bộ `last_synced_at` = NULL.
+    """
+    return {k: v for k, v in row.items()
+            if k in _KEEP_EMPTY or v not in (None, "", [], {})}
+
+
 def to_anime_row(m: Dict) -> Dict:
-    """Chuẩn hoá media của AniList → row cho bảng `anime`."""
+    """Chuẩn hoá media của AniList → row cho bảng `anime`.
+
+    Trả về payload ĐÃ BỎ khoá rỗng (xem `_drop_empty`) để upsert không xoá dữ
+    liệu tốt đã có từ nguồn khác.
+    """
     t = m.get("title") or {}
     studio_nodes = ((m.get("studios") or {}).get("nodes") or [])
-    return {
+    row = {
         "anilist_id": m["id"],
         "mal_id": m.get("idMal"),
         "slug": slugify(t.get("romaji") or t.get("english") or "", m["id"]),
@@ -247,8 +268,11 @@ def to_anime_row(m: Dict) -> Dict:
         "synopsis_original": clean_html(m.get("description")),
         "studios": [n["name"] for n in studio_nodes if n.get("name")],
         "source": "anilist",
-        "last_synced_at": None,   # Postgres tự set bằng now() ở tầng dưới
+        # Cột này KHÔNG có default ở DB (suốt 126/126 bộ luôn NULL) → phải tự set,
+        # nếu không thì không ai biết bộ nào đã được đồng bộ lần cuối khi nào.
+        "last_synced_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     }
+    return _drop_empty(row)
 
 
 def to_iso(ts: Any) -> Optional[str]:
@@ -264,9 +288,16 @@ def to_iso(ts: Any) -> Optional[str]:
 
 
 def to_episode_row(anime_id: int, number: int, airing_at: Any, title: str = "") -> Dict:
-    return {
-        "anime_id": anime_id,
-        "number": number,
-        "airing_at": to_iso(airing_at),
-        "title": title or None,
-    }
+    """Row cho bảng `episodes` — CHỈ gồm cột thật sự có dữ liệu.
+
+    `title`/`airing_at` rỗng bị BỎ HẲN khỏi payload, vì upsert merge-duplicates
+    sẽ ghi NULL đè lên tên tập do TMDB/Jikan điền. Trước đây job A (mỗi 30 phút)
+    gửi `title: None` cho mọi tập đang chiếu → xoá sạch tên tập.
+    """
+    row: Dict[str, Any] = {"anime_id": anime_id, "number": number}
+    iso = to_iso(airing_at)
+    if iso:
+        row["airing_at"] = iso
+    if title:
+        row["title"] = title
+    return row

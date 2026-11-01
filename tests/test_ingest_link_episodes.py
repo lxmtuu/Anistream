@@ -33,6 +33,9 @@ class FakeDB:
             return [{"anime_id": a} for a in self.episodes]
         return []
 
+    def select_all(self, table, query, page_size=1000, max_rows=200000):
+        return self.select(table, query)
+
     def upsert(self, table, rows, on_conflict=None, fallback_per_row=False):
         self.upserted.append((table, list(rows), on_conflict))
         return list(rows)

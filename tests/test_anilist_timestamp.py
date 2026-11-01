@@ -45,7 +45,10 @@ class TestIsoTimestamp(unittest.TestCase):
         self.assertNotIsInstance(row["airing_at"], int)
         self.assertEqual(row["number"], 3)
         self.assertEqual(row["anime_id"], 7)
-        self.assertIsNone(row["title"])          # title rỗng → NULL, không phải ""
+        # HỒI QUY: title rỗng phải BỎ HẲN khoá khỏi payload (không phải gửi None).
+        # Gửi `title: None` → upsert merge-duplicates ghi NULL đè lên tên tập mà
+        # TMDB/Jikan đã điền; job A chạy 30 phút/lần nên xoá sạch tên tập.
+        self.assertNotIn("title", row)
 
     def test_episode_row_giu_title(self):
         self.assertEqual(to_episode_row(1, 1, 1793536200, "Tập 1")["title"], "Tập 1")

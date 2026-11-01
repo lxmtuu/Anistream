@@ -17,6 +17,7 @@ import { sendMany } from "../_shared/fcm.ts";
 import { toInt } from "../_shared/query.ts";
 import {
   episodeKey,
+  episodePairs,
   FreshEpisode,
   keysOf,
   planMessages,
@@ -34,12 +35,16 @@ async function releaseReservations(
   fresh: FreshEpisode[],
 ): Promise<void> {
   if (fresh.length === 0) return;
-  const { error } = await sb
-    .from("sent_episode_pushes")
-    .delete()
-    .in("anime_id", [...new Set(fresh.map((e) => e.anime_id))])
-    .in("episode_number", [...new Set(fresh.map((e) => e.number))]);
-  if (error) console.error("không nhả được reservation:", error.message);
+  // Xoá theo TỪNG CẶP. Dùng 2 lần `.in()` là AND → xoá tích chéo và nhả nhầm
+  // quyền của tập chưa gửi ⇒ cron sau gửi trùng.
+  for (const p of episodePairs(fresh)) {
+    const { error } = await sb
+      .from("sent_episode_pushes")
+      .delete()
+      .eq("anime_id", p.anime_id)
+      .eq("episode_number", p.number);
+    if (error) console.error("không nhả được reservation:", error.message);
+  }
 }
 
 Deno.serve(

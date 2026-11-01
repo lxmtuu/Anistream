@@ -202,6 +202,31 @@ select a.title_romaji, count(e.number) from anime a
 > Muốn job D chạy tự động hằng ngày: thêm `TMDB_API_KEY` vào GitHub secrets
 > (Settings → Secrets → Actions). Không có key thì job D tự bỏ qua kèm cảnh báo.
 
+### Vá 02/11/2026 — 4 lỗi "âm thầm" làm mất dữ liệu
+
+Rà lại toàn bộ pipeline, tìm được 4 chỗ ghi/sửa dữ liệu SAI mà không chỗ nào báo lỗi:
+
+| Lỗi | Bằng chứng trên DB thật | Đã sửa |
+|---|---|---|
+| Job A/B gửi khoá `null` khi AniList trả rỗng | **8 bộ có 12–13 tập mà `episodes_total` = NULL**; 126/126 bộ `last_synced_at` = NULL | bỏ khoá rỗng khỏi payload |
+| Job A gửi `title: None` cho mọi tập đang chiếu | xoá tên tập TMDB/Jikan điền (job chạy 30 phút/lần) | bỏ khoá khi rỗng |
+| Đọc PostgREST không phân trang | Supabase cắt ở **1000 dòng** → job C' tưởng bộ sau dòng 1000 "chưa có tập" | `DB.select_all()` |
+| `jikan` bỏ qua bộ đã có ≥1 tập | **33 bộ** thiếu vài tập không bao giờ được lấp | `jikan --fill-gaps` |
+
+Đã vá dữ liệu đang có + thêm **Job G** (`check`) kiểm bất biến mỗi ngày (vi phạm
+cứng → job ĐỎ): tập vượt tổng, tập đánh số ≤ 0, slug trùng, 1 URL gắn 2 bộ, dòng
+mồ côi. Chạy tay:
+
+```bash
+python3 -m ingest.main check
+```
+
+**Phải deploy lại edge function** (code `/home`, `/anime`, `/search`, `push` đổi):
+
+```bash
+supabase functions deploy home search schedule anime push
+```
+
 ### Vá 01/11/2026 — bộ có video nhưng 0 tập, và bộ thiếu mùa 1
 
 Rà soát toàn bộ 126 bộ thấy 2 lỗ hổng thật (số liệu chi tiết: `ingest/README.md` § 8 job ingest):

@@ -155,8 +155,11 @@ class _Hero extends StatelessWidget {
               if (next != null) ...[
                 const SizedBox(height: 6),
                 Text(
+                  // "xem được" = có video official thật, KHÔNG đếm tập chỉ có
+                  // lịch phát và không đếm entry 0 (bản gộp cả bộ).
                   next.airingAt == null
-                      ? 'Có ${anime.episodes.length} tập xem được'
+                      ? 'Có ${anime.episodes.where((e) => e.playable && e.number > 0).length}'
+                          ' tập xem được'
                       : 'Tập ${next.number} · ${VnTime.countdown(next.airingAt!)}',
                   style: const TextStyle(fontSize: 12, color: AppTheme.muted),
                 ),

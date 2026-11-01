@@ -58,7 +58,7 @@ Quy tắc **thà thiếu còn hơn sai**:
 Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API Key (v3)**.
 ⚠️ Không dùng "Read Access Token (v4)" — code gọi bằng `api_key`.
 
-## 8 job ingest
+## 9 job ingest
 
 | Job | Lệnh | Nguồn | Chạy |
 |---|---|---|---|
@@ -69,9 +69,10 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 | D | `tmdb` | TMDB: tiếng Việt + tập | hằng ngày |
 | D' | `tmdb --refresh` | TMDB: **tập MỚI** của bộ đang chiếu | hằng ngày |
 | E | `seasons` | AniList `relations` → **mùa thiếu** (SEQUEL + PREQUEL) | hằng ngày |
-| F | `jikan` | Jikan/MAL → lấp tập còn thiếu | hằng ngày |
+| F | `jikan` | Jikan/MAL → lấp tập còn thiếu (`--fill-gaps`: cả bộ thiếu vài tập) | hằng ngày |
+| G | `check` | **kiểm bất biến dữ liệu**, vi phạm cứng → job ĐỎ | hằng ngày |
 
-`all` = A + B + C + C' + D + D' + E + F.
+`all` = A + B + C + C' + D + D' + E + F + G.
 
 ### Vì sao cần D' và E (2 lỗi cũ)
 
@@ -91,6 +92,46 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 - **F** — AniList chỉ có tổng số tập, TMDB hay thiếu bản dịch. Jikan miễn phí, không
   cần key, tra theo `mal_id` (bảng `anime` đã lưu từ `idMal`) → lấp `title` + `aired`.
   Bỏ tập `filler` và tập vượt `episodes_total`.
+
+### Vì sao có Job G (và 3 lỗi "âm thầm" khác đã vá 02/11/2026)
+
+Rà lại toàn pipeline thấy 4 chỗ hỏng mà **không chỗ nào báo lỗi**:
+
+| Lỗi | Hậu quả thật trên DB | Bản vá |
+|---|---|---|
+| `to_anime_row` gửi khoá `None` khi AniList trả rỗng | upsert merge-duplicates ghi NULL đè `episodes_total`/`cover_url`/`score` mỗi 30 phút → **8 bộ có 12–13 tập mà `episodes_total` = NULL**, 126/126 bộ `last_synced_at` = NULL | Bỏ khoá rỗng khỏi payload + tự set `last_synced_at` |
+| `to_episode_row` gửi `title: None` | job A xoá tên tập TMDB/Jikan đã điền | Bỏ khoá khi rỗng (cả ở `tmdb.episode_rows`, `jikan.episode_rows`) |
+| Không phân trang khi đọc PostgREST | Supabase cắt ở **1000 dòng**; `limit=20000` vẫn chỉ 1000 → job C' coi bộ sau dòng 1000 là "chưa có tập", job E báo nhầm "mùa mới" | `DB.select_all()` tự limit+offset, dùng ở C'/E/audit |
+| `jikan` bỏ qua mọi bộ đã có ≥1 tập | 33 bộ thiếu vài tập không bao giờ được lấp | cờ `--fill-gaps` (chỉ thêm số tập còn thiếu) |
+
+Job G kiểm: tập vượt tổng, tập đánh số ≤ 0, slug trùng, một URL gắn 2 bộ, dòng mồ
+côi (cứng) và link vượt tổng / bộ có link mà 0 tập / bộ không rõ tổng (mềm).
+
+### Edge Function: 3 chỗ cắt dữ liệu ở 1000 dòng (vá 02/11/2026)
+
+PostgREST của Supabase có "Max Rows" = **1000**: `.limit(1200)` vẫn chỉ trả 1000
+dòng. Ba API đang dựa vào limit cứng nên khi dữ liệu lớn lên sẽ **thiếu tập một
+cách âm thầm** (bộ nằm sau dòng 1000 hiện "0 tập"):
+
+| API | Trước | Sau |
+|---|---|---|
+| `/home` | `episodes` `.limit(1200)`, `links` `.limit(1200)`, `free_legal` `.limit(300)` | `selectAll()` đọc hết trang; shelf "Xem ngay" không còn mất bộ (DB đã có **485** link free) |
+| `/anime` | `episodes`/`links` `.limit(600)` | `selectAll()` theo `order` ổn định |
+| `/search` | `episodes`/`links` `.limit(600)` cho tới 48 bộ | `selectAll()` |
+
+Kèm 2 lỗi nữa cùng đợt:
+- **Chọn video theo region**: một tập có cả bản VN và bản Asia thì ai "thắng" là
+  ngẫu nhiên (thứ tự PostgREST không đảm bảo) → nay ưu tiên `VN`, rồi `AS`.
+- **`push` nhả reservation sai**: xoá bằng 2 lần `.in()` = AND → xoá tích chéo
+  `(A,3)`, `(B,5)` của những tập CHƯA gửi ⇒ cron sau gửi trùng. Nay xoá từng cặp.
+- **Số tập trên app** đếm cả entry 0 ("bản gộp cả bộ") → bộ 12 tập hiện
+  "Tập phim (13)". Nay đếm bằng `realEpisodeCount()`.
+
+⚠️ Sau khi `git pull`, phải deploy lại edge function thì thay đổi mới có hiệu lực:
+
+```bash
+supabase functions deploy home search schedule anime push
+```
 
 ### Cron: GitHub không đủ tin cậy
 
