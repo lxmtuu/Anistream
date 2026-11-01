@@ -202,7 +202,7 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True):
     print(f"  · {len(rows)} anime cần làm giàu")
 
     patched = eps_written = 0
-    no_match, no_vi, multi_season = [], [], []
+    no_match, no_vi, multi_season, implausible = [], [], [], []
     for i, row in enumerate(rows, 1):
         label = (row.get("title_english") or row.get("title_romaji") or row.get("slug"))[:46]
         try:
@@ -212,12 +212,24 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True):
                 continue
             detail = tmdb.fetch_detail(best["id"])
             title_vi, overview_vi = tmdb.extract_vietnamese(detail)
-            seasons = tmdb.real_seasons(detail)
-            single = len(seasons) == 1
-            if len(seasons) > 1:
-                multi_season.append(f"{label}  ({len(seasons)} mùa)")
 
-            patch = tmdb.build_anime_patch(row, detail, title_vi, overview_vi, single)
+            # TMDB gộp cả series vào 1 id; AniList tách từng mùa. Phải chọn đúng mùa
+            # thì danh sách tập mới đúng — trước đây bỏ qua MỌI bộ nhiều mùa nên
+            # Takagi-san (3 mùa) không có tập nào dù đã có tmdb_id.
+            season_no, why = tmdb.pick_season(
+                detail, row.get("year"), row.get("episodes_total"))
+            matched = season_no is not None
+            if not matched and len(tmdb.real_seasons(detail)) > 1:
+                multi_season.append(f"{label}  ({why})")
+
+            hint = None
+            if matched:
+                hint = next(
+                    (s["count"] for s in tmdb.season_candidates(detail)
+                     if s["number"] == season_no), None)
+
+            patch = tmdb.build_anime_patch(row, detail, title_vi, overview_vi,
+                                           matched, episodes_total_hint=hint)
             if patch:
                 DB.patch("anime", {"id": row["id"]}, patch)
                 patched += 1
@@ -229,16 +241,25 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True):
             elif not title_vi and not overview_vi:
                 no_vi.append(label)
 
-            # Danh sách tập: chỉ khi phim có đúng 1 mùa VÀ row chưa có tập nào.
-            if with_episodes and single and not row.get("episodes_total"):
+            # Danh sách tập: khi đã xác định được mùa VÀ row chưa có tập nào.
+            # (Trước đây còn đòi `episodes_total is null` → bộ nào AniList đã biết
+            #  tổng số tập thì KHÔNG BAO GIỜ có danh sách tập. Đó là lỗi.)
+            if with_episodes and matched:
                 have = DB.select("episodes", f"select=number&anime_id=eq.{row['id']}&limit=1")
                 if not have:
-                    season = tmdb.fetch_season(best["id"], seasons[0])
-                    eps = tmdb.episode_rows(row["id"], season, single)
-                    if eps:
-                        DB.upsert("episodes", eps, on_conflict="anime_id,number")
-                        eps_written += len(eps)
-                        print(f"      + {len(eps)} tập")
+                    season = tmdb.fetch_season(best["id"], season_no)
+                    n_season = len([e for e in (season.get("episodes") or [])
+                                    if isinstance(e.get("episode_number"), int)])
+                    if not tmdb.episodes_plausible(row.get("episodes_total"), n_season):
+                        implausible.append(
+                            f"{label}  (TMDB {n_season} tập > AniList "
+                            f"{row.get('episodes_total')})")
+                    else:
+                        eps = tmdb.episode_rows(row["id"], season, matched)
+                        if eps:
+                            DB.upsert("episodes", eps, on_conflict="anime_id,number")
+                            eps_written += len(eps)
+                            print(f"      + {len(eps)} tập (mùa {season_no}, {why})")
         except tmdb.TmdbError:
             raise                      # lỗi cấu hình/mạng → nổ ngay, không nuốt
         except Exception as e:         # lỗi 1 bộ không được làm chết cả job
@@ -251,8 +272,15 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True):
     if no_vi:
         print(f"  ⚠ {len(no_vi)} anime có trên TMDB nhưng CHƯA có bản dịch tiếng Việt")
     if multi_season:
-        print(f"  ⚠ {len(multi_season)} anime nhiều mùa → chỉ lấy tên/tóm tắt, "
-              f"KHÔNG lấy tập (tránh gán sai số tập)")
+        print(f"  ⚠ {len(multi_season)} anime nhiều mùa mà KHÔNG xác định được mùa nào "
+              f"→ chỉ lấy tên/tóm tắt, không lấy tập:")
+        for n in multi_season[:8]:
+            print(f"      - {n}")
+    if implausible:
+        print(f"  ⚠ {len(implausible)} anime có danh sách tập TMDB KHÔNG hợp với AniList "
+              f"→ không ghi (tránh gán sai):")
+        for n in implausible[:8]:
+            print(f"      - {n}")
 
     DB.log_ingest("tmdb", "enrich", True, patched + eps_written)
     print(f"  ✓ {patched} anime được bổ sung · {eps_written} tập")

@@ -215,5 +215,77 @@ class TestHttp(unittest.TestCase):
         self.assertEqual(params["query"], "frieren")
 
 
+class TestPickSeason(unittest.TestCase):
+    """Chọn ĐÚNG mùa TMDB cho 1 entry AniList.
+
+    Bối cảnh thật: TMDB id 75865 (Takagi-san) có 3 mùa 12 tập; AniList tách
+    "Karakai Jouzu no Takagi-san" (2018) / "2nd Season" (2019) / "3rd Season" (2022)
+    thành 3 entry. Không chọn mùa thì không có danh sách tập nào.
+    """
+
+    D = {"seasons": [
+        {"season_number": 0, "episode_count": 1, "air_date": "2017-01-01"},
+        {"season_number": 1, "episode_count": 12, "air_date": "2018-01-08"},
+        {"season_number": 2, "episode_count": 12, "air_date": "2019-07-07"},
+        {"season_number": 3, "episode_count": 12, "air_date": "2022-01-08"},
+    ]}
+
+    def test_mot_mua_thi_lay_luon(self):
+        d = {"seasons": [{"season_number": 1, "episode_count": 24,
+                          "air_date": "2023-10-01"}]}
+        self.assertEqual(tmdb.pick_season(d, 2023, 24)[0], 1)
+
+    def test_nhieu_mua_giong_nhau_thi_dung_NAM(self):
+        # cả 3 mùa đều 12 tập → số tập không phân biệt được, phải dùng năm
+        self.assertEqual(tmdb.pick_season(self.D, 2018, 12)[0], 1)
+        self.assertEqual(tmdb.pick_season(self.D, 2019, 12)[0], 2)
+        self.assertEqual(tmdb.pick_season(self.D, 2022, 12)[0], 3)
+
+    def test_khong_co_nam_thi_dung_SO_TAP_neu_duy_nhat(self):
+        d = {"seasons": [
+            {"season_number": 1, "episode_count": 12, "air_date": "2018-01-08"},
+            {"season_number": 2, "episode_count": 24, "air_date": "2019-07-07"},
+        ]}
+        self.assertEqual(tmdb.pick_season(d, None, 24)[0], 2)
+
+    def test_mo_ho_thi_TRA_NONE_khong_doan(self):
+        d = {"seasons": [
+            {"season_number": 1, "episode_count": 12, "air_date": "2018-01-08"},
+            {"season_number": 2, "episode_count": 12, "air_date": "2019-07-07"},
+        ]}
+        so, why = tmdb.pick_season(d, None, 12)
+        self.assertIsNone(so)
+        self.assertIn("không xác định", why)
+
+    def test_bo_qua_season_0_specials(self):
+        d = {"seasons": [{"season_number": 0, "episode_count": 99},
+                         {"season_number": 1, "episode_count": 12,
+                          "air_date": "2020-01-01"}]}
+        self.assertEqual(tmdb.pick_season(d, None, None)[0], 1)
+
+    def test_khong_co_mua_nao(self):
+        self.assertIsNone(tmdb.pick_season({"seasons": []})[0])
+
+
+class TestEpisodesPlausible(unittest.TestCase):
+    """Không ghi danh sách tập khi TMDB trả nhiều hơn hẳn AniList."""
+
+    def test_khop_chinh_xac(self):
+        self.assertTrue(tmdb.episodes_plausible(12, 12))
+
+    def test_dang_chieu_con_thieu_tap(self):
+        self.assertTrue(tmdb.episodes_plausible(12, 8))
+
+    def test_tmdb_nhieu_hon_han(self):
+        # Fool Night thật: AniList 3 tập, TMDB trả 12 → nghi lấy nhầm
+        self.assertFalse(tmdb.episodes_plausible(3, 12))
+
+    def test_chua_biet_tong_thi_cho_qua(self):
+        self.assertTrue(tmdb.episodes_plausible(None, 12))
+
+    def test_mua_rong(self):
+        self.assertTrue(tmdb.episodes_plausible(12, 0))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -58,10 +58,13 @@ ROW = {
 MATCH = ({"id": 12345, "name": "Kusuriya no Hitorigoto"}, 0.93, "search[Kusuriya]")
 
 
-def _detail(seasons=(1,), total=24):
+def _detail(seasons=(1,), total=24, meta=None):
+    """`meta` cho phép khai báo episode_count/air_date từng mùa (mô phỏng TMDB thật)."""
+    meta = meta or {}
     return {
         "id": 12345, "name": "Kusuriya no Hitorigoto", "number_of_episodes": total,
-        "seasons": [{"season_number": s} for s in (0,) + tuple(seasons)],
+        "seasons": [dict({"season_number": s}, **meta.get(s, {}))
+                    for s in (0,) + tuple(seasons)],
         "translations": {"translations": [
             {"iso_639_1": "vi", "data": {"name": "Dược Sư Tự Sự", "overview": "Maomao."}}]},
         "alternative_titles": {"results": []},
@@ -69,14 +72,15 @@ def _detail(seasons=(1,), total=24):
 
 
 class TestJobTmdb(unittest.TestCase):
-    def _run(self, db, seasons=(1,), total=24, match=None):
+    def _run(self, db, seasons=(1,), total=24, match=None, meta=None, eps=None):
         """Chạy job với TMDB giả. `match` cho phép mô phỏng không-khớp hoặc lỗi."""
         match_fn = match or (lambda row: MATCH)
         with patch.object(tmdb, "is_configured", return_value=True), \
              patch.object(tmdb, "match_anime", side_effect=match_fn), \
              patch.object(tmdb, "fetch_detail",
-                          side_effect=lambda tv: _detail(seasons=seasons, total=total)), \
-             patch.object(tmdb, "fetch_season", side_effect=lambda tv, n: {"episodes": [
+                          side_effect=lambda tv: _detail(seasons=seasons, total=total,
+                                                         meta=meta)), \
+             patch.object(tmdb, "fetch_season", side_effect=lambda tv, n: {"episodes": eps or [
                  {"episode_number": 1, "name": "Tập 1", "air_date": "2023-10-01"},
                  {"episode_number": 2, "name": "Tập 2", "air_date": "2023-10-08"},
              ]}):
@@ -116,6 +120,42 @@ class TestJobTmdb(unittest.TestCase):
         db = FakeDB([dict(ROW)], existing_episodes={5: [{"number": 1}]})
         self._run(db)
         self.assertEqual([u for u in db.upserted if u[0] == "episodes"], [])
+
+    def test_da_co_episodes_total_van_lay_danh_sach_tap(self):
+        """HỒI QUY: bộ đã có `episodes_total` từ AniList từng KHÔNG BAO GIỜ có tập.
+
+        Takagi-san (12 tập, tmdb_id 75865) là ca thật: trang chi tiết hiện
+        "12 tập" ở tiêu đề nhưng chỉ có 6 tập từ link YouTube, vì điều kiện cũ
+        đòi `episodes_total is null` mới đi lấy danh sách tập.
+        """
+        db = FakeDB([dict(ROW, episodes_total=24)])
+        self._run(db)
+        eps_upserts = [u for u in db.upserted if u[0] == "episodes"]
+        self.assertEqual(len(eps_upserts), 1, "phải lấy danh sách tập dù đã biết tổng")
+        self.assertEqual([r["number"] for r in eps_upserts[0][1]], [1, 2])
+        self.assertNotIn("episodes_total", db.patched[0][2])   # không ghi đè số đã có
+
+    def test_nhieu_mua_chon_theo_nam_roi_lay_tap(self):
+        """Takagi-san: 3 mùa đều 12 tập, entry AniList là mùa 1 (2018)."""
+        row = dict(ROW, year=2018, episodes_total=12)
+        meta = {1: {"episode_count": 12, "air_date": "2018-01-08"},
+                2: {"episode_count": 12, "air_date": "2019-07-07"},
+                3: {"episode_count": 12, "air_date": "2022-01-08"}}
+        db = FakeDB([row])
+        _, out = self._run(db, seasons=(1, 2, 3), total=36, meta=meta)
+        self.assertEqual(len([u for u in db.upserted if u[0] == "episodes"]), 1)
+        self.assertIn("mùa 1", out)
+        self.assertIn("khớp năm 2018", out)
+
+    def test_tmdb_nhieu_tap_hon_anilist_thi_khong_ghi(self):
+        """Fool Night thật: AniList 3 tập, TMDB season trả 12 → không ghi, báo rõ."""
+        row = dict(ROW, episodes_total=3)
+        eps = [{"episode_number": i, "name": f"T{i}", "air_date": "2026-01-0%d" % (i % 9 + 1)}
+               for i in range(1, 13)]
+        db = FakeDB([row])
+        _, out = self._run(db, eps=eps)
+        self.assertEqual([u for u in db.upserted if u[0] == "episodes"], [])
+        self.assertIn("KHÔNG hợp với AniList", out)
 
     def test_khong_match_thi_khong_ghi_gi(self):
         db = FakeDB([dict(ROW)])

@@ -17,6 +17,7 @@
 | 5 | Chạy app với dữ liệu thật | 10' | ✅ |
 | 5b | Tiếng Việt + danh sách tập (TMDB) | 5' | ⚙️ nên làm |
 | 5c | Nhiều tập hơn mỗi bộ (YouTube API) | 5' | ⚙️ nên làm |
+| 5d | Sửa danh sách tập trống (chạy lại job D) | 2' | 🔴 nên làm |
 | 6 | Bật thông báo đẩy + tự động hoá | 20' | ⚙️ tuỳ chọn |
 
 ---
@@ -163,9 +164,40 @@ from anime;                                   -- cả 3 phải > 0
 select count(distinct anime_id) from episodes; -- phải tăng so với trước
 ```
 
-Job D **không ghi đè** dữ liệu đã có, **không** lấy số tập của phim nhiều mùa, và
-bộ nào không ghép được tên/năm thì bỏ qua (in `không tìm được trên TMDB`) chứ
-không đoán bừa. Chi tiết quy tắc: `ingest/README.md` § Job D.
+Job D **không ghi đè** dữ liệu đã có; bộ nào không ghép được tên/năm thì bỏ qua
+(in `không tìm được trên TMDB`) chứ không đoán bừa. Chi tiết quy tắc:
+`ingest/README.md` § Job D.
+
+### Nếu danh sách tập vẫn trống (bản cũ) — chạy lại một lần
+
+Bản đầu của job D có 2 lỗi khiến **hầu hết bộ không có danh sách tập**, dù
+`tmdb_id` đã có:
+
+- bỏ qua mọi phim **nhiều mùa** (Takagi-san có 3 mùa → 0 tập)
+- bỏ qua mọi bộ AniList **đã biết tổng số tập** (điều kiện `episodes_total is null`)
+
+Bản mới chọn đúng mùa TMDB (`pick_season`): mùa duy nhất → khớp **năm** → khớp
+**số tập** → không chắc thì bỏ. Chạy lại:
+
+```bash
+python3 -m ingest.main tmdb --limit-tmdb 200
+```
+
+**Kỳ vọng mới** (log có thêm lý do chọn mùa):
+
+```
+  [1/104] Teasing Master Takagi-san     tmdb=75865 0.95 ← ...
+      + 12 tập (mùa 1, khớp năm 2018)
+```
+
+Kiểm nhanh:
+
+```sql
+select count(distinct anime_id) from episodes;   -- 34 → ~80+
+select a.title_romaji, count(e.number) from anime a
+  left join episodes e on e.anime_id = a.id
+  where a.slug = 'karakai-jouzu-no-takagi-san' group by 1;  -- phải là 12
+```
 
 > Muốn job D chạy tự động hằng ngày: thêm `TMDB_API_KEY` vào GitHub secrets
 > (Settings → Secrets → Actions). Không có key thì job D tự bỏ qua kèm cảnh báo.
