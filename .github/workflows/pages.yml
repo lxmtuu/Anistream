@@ -16,9 +16,10 @@ name: pages
 
 on:
   push:
+    # Build ở mọi nhánh để mỗi thay đổi đều được kiểm tra "web có build được không".
+    # Deploy vẫn chỉ chạy trên main (xem điều kiện `if` ở job deploy).
     branches:
-      - main
-      - arena/95786384-anistream
+      - "**"
     paths:
       - "app/**"
       - ".github/workflows/pages.yml"
@@ -59,28 +60,32 @@ jobs:
           }
           json=$(probe "$GH_TOKEN" || echo '{}')
           build_type=$(printf '%s' "$json" | jq -r '.build_type // empty' 2>/dev/null || true)
-
           if [ -z "$build_type" ]; then
             # token của workflow không có quyền admin → thử gọi công khai
             json=$(probe "" || echo '{}')
             build_type=$(printf '%s' "$json" | jq -r '.build_type // empty' 2>/dev/null || true)
           fi
-          [ -z "$build_type" ] && build_type=none
+          echo "build_type=${build_type:-unknown}"
 
-          echo "build_type=$build_type"
-          echo "api trả: $(printf '%s' "$json" | tr -d '\n' | head -c 300)"
-
-          # Deploy chỉ chạy được khi Pages dùng GitHub Actions làm nguồn.
+          # Quy tắc:
+          #   workflow      → deploy
+          #   legacy/khác   → chỉ build (deploy sẽ bị GitHub từ chối)
+          #   KHÔNG đọc được (unknown) trên main → VẪN thử deploy.
+          # Lý do: bỏ qua deploy vì "không đọc được cấu hình" là kiểu hỏng tệ nhất —
+          # CI xanh nhưng web không bao giờ cập nhật, và không ai nhận ra.
           if [ "$build_type" = "workflow" ]; then
             echo "can_deploy=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$build_type" ] || [ "$build_type" = "unknown" ]; then
+            echo "can_deploy=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Không đọc được cấu hình Pages → vẫn thử deploy (job deploy sẽ báo lỗi rõ nếu bị chặn)"
           else
             echo "can_deploy=false" >> "$GITHUB_OUTPUT"
             {
               echo "### ⚠️ Pages chưa ở chế độ GitHub Actions (build_type=\`$build_type\`)"
               echo ""
-              echo "Bản web **đã build thành công** — đây là phần quan trọng: code Flutter biên dịch được cho web."
+              echo "Bản web **đã build thành công** — code Flutter biên dịch được cho web."
               echo ""
-              echo "Để có link xem app: **Settings → Pages → Build and deployment → Source: GitHub Actions**, rồi chạy lại workflow này."
+              echo "Để deploy: **Settings → Pages → Build and deployment → Source: GitHub Actions**, rồi chạy lại workflow này."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -120,9 +125,8 @@ jobs:
 
   deploy:
     needs: build
-    # Lỗi deploy (thường do cấu hình Pages/environment phía GitHub) không được
-    # biến thành "code hỏng": job build ở trên mới là thứ phản ánh chất lượng code.
-    continue-on-error: true
+    # KHÔNG bọc continue-on-error: deploy hỏng phải đỏ để nhìn thấy ngay.
+    # (Trước đây skip im lặng → CI xanh mà web vẫn là bản cũ, rất khó phát hiện.)
     # Chỉ deploy từ main: bản Pages chính thức thuộc về main, và environment
     # `github-pages` chỉ cho branch mặc định deploy (branch khác sẽ bị từ chối).
     # Trên nhánh khác workflow vẫn BUILD để chứng minh code web biên dịch được.
