@@ -47,9 +47,9 @@ jobs:
         id: pages
         continue-on-error: true
         run: |
-          json=$(curl -s \
-            -H "Authorization: Bearer ${{ github.token }}" \
-            -H "Accept: application/vnd.github+json" \
+          # Gọi KHÔNG kèm token: endpoint này công khai với repo public, còn
+          # GITHUB_TOKEN không có quyền admin nên sẽ trả 403 (đã thử).
+          json=$(curl -s -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}/pages" || echo '{}')
           build_type=$(echo "$json" | grep -o '"build_type":"[^"]*"' | cut -d'"' -f4)
           echo "build_type=${build_type:-none}"
@@ -106,7 +106,10 @@ jobs:
 
   deploy:
     needs: build
-    if: needs.build.outputs.can_deploy == 'true'
+    # Chỉ deploy từ main: bản Pages chính thức thuộc về main, và environment
+    # `github-pages` chỉ cho branch mặc định deploy (branch khác sẽ bị từ chối).
+    # Trên nhánh khác workflow vẫn BUILD để chứng minh code web biên dịch được.
+    if: needs.build.outputs.can_deploy == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
