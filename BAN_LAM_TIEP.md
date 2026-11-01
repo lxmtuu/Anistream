@@ -202,6 +202,57 @@ select a.title_romaji, count(e.number) from anime a
 > Muốn job D chạy tự động hằng ngày: thêm `TMDB_API_KEY` vào GitHub secrets
 > (Settings → Secrets → Actions). Không có key thì job D tự bỏ qua kèm cảnh báo.
 
+### Vá 02/11/2026 — 4 lỗi "âm thầm" làm mất dữ liệu
+
+Rà lại toàn bộ pipeline, tìm được 4 chỗ ghi/sửa dữ liệu SAI mà không chỗ nào báo lỗi:
+
+| Lỗi | Bằng chứng trên DB thật | Đã sửa |
+|---|---|---|
+| Job A/B gửi khoá `null` khi AniList trả rỗng | **3 bộ có 12–13 tập đầy đủ mà `episodes_total` = NULL** (khớp giả thuyết bị ghi đè); 126/126 bộ `last_synced_at` = NULL | bỏ khoá rỗng khỏi payload |
+| Job A gửi `title: None` cho mọi tập đang chiếu | xoá tên tập TMDB/Jikan điền (job chạy 30 phút/lần) | bỏ khoá khi rỗng |
+| Đọc PostgREST không phân trang | Supabase cắt ở **1000 dòng** → job C' tưởng bộ sau dòng 1000 "chưa có tập" | `DB.select_all()` |
+| `jikan` bỏ qua bộ đã có ≥1 tập | **33 bộ** thiếu vài tập không bao giờ được lấp | `jikan --fill-gaps` |
+
+Đã vá dữ liệu đang có + thêm **Job G** (`check`) kiểm bất biến mỗi ngày (vi phạm
+cứng → job ĐỎ): tập vượt tổng, tập đánh số ≤ 0, slug trùng, 1 URL gắn 2 bộ, dòng
+mồ côi. Chạy tay:
+
+```bash
+python3 -m ingest.main check
+```
+
+**Phải deploy lại edge function** (code `/home`, `/anime`, `/search`, `push` đổi):
+
+```bash
+supabase functions deploy home search schedule anime push
+```
+
+### Vá 01/11/2026 — bộ có video nhưng 0 tập, và bộ thiếu mùa 1
+
+Rà soát toàn bộ 126 bộ thấy 2 lỗ hổng thật (số liệu chi tiết: `ingest/README.md` § 8 job ingest):
+
+- **23/27 bộ có link nhưng bảng `episodes` trống** (`dandadan` 12 link/0 tập,
+  `noblesse` 13/0) vì tập chỉ đến từ TMDB. Nay có **Job C'** — tạo tập từ chính
+  link official, không vượt `episodes_total`.
+- **9/10 bộ tên "Season 2/3" thiếu hẳn mùa 1** (`ao-no-hako-season-2`,
+  `black-clover-2nd-season`, …) vì Job E chỉ đi `SEQUEL`. Nay đi thêm `PREQUEL`.
+
+Chạy một lần để vá dữ liệu đang có (1 dòng):
+
+```bash
+python3 -m ingest.main episodes && python3 -m ingest.main seasons --limit-seasons 200
+```
+
+Kỳ vọng: `✓ <n> bộ · <m> tập tạo từ link`, rồi `+ mùa TRƯỚC: …`. Sau đó kiểm:
+
+```sql
+-- không còn bộ nào có link mà 0 tập (phải trả về 0 dòng)
+select a.slug, count(l.*) from anime a
+  join streaming_links l on l.anime_id = a.id and l.kind = 'free_legal'
+  where not exists (select 1 from episodes e where e.anime_id = a.id)
+  group by 1;
+```
+
 ## Bước 3d — Nhiều tập hơn cho mỗi bộ (YouTube Data API, 5 phút)
 
 Hiện 4/5 bộ "miễn phí" chỉ có **1 tập** (bộ kia có 6). Nguyên nhân: RSS chỉ trả
@@ -257,6 +308,72 @@ Kiểm:
 ```sql
 select count(distinct anime_id) from streaming_links where kind='free_legal' and is_verified;
 select count(*) from streaming_links where kind='free_legal' and is_verified;
+```
+
+### Chỉ giữ Muse Việt Nam + xếp đúng bộ/mùa
+
+Bản mới **mặc định chỉ ingest Muse Việt Nam** (`YOUTUBE_CHANNELS=muse_vn` trong
+`.env`), và chọn đúng entry AniList của từng mùa: đọc `Mùa 2`/`Season 2`/`(S2)` và
+năm trong tiêu đề, loại entry không đủ chỗ cho tập, **không ghi** link có tập vượt
+tổng số tập của bộ.
+
+Dọn link của kênh khác (Ani-One) và link sai tập — chạy **sau khi** đã ingest lại:
+
+```bash
+python3 -m ingest.audit --channel muse_vn            # chỉ xem, in báo cáo
+python3 -m ingest.audit --channel muse_vn --fix      # sửa + XOÁ link kênh khác
+```
+
+`--fix --channel muse_vn` làm 3 việc: lưu `source_title`, sửa/xoá link sai số tập,
+và xoá mọi link `region ≠ VN` (kênh Ani-One) để app chỉ còn nội dung Muse VN.
+
+Kiểm lại sau khi chạy:
+
+```sql
+select region, count(*) as so_link, count(distinct anime_id) as so_bo
+from streaming_links where kind = 'free_legal' group by region;   -- chỉ còn VN
+```
+
+**Kiểm xem bộ nào bị gán sai tập** (công cụ mới, không cần key YouTube):
+
+```bash
+python3 -m ingest.audit                 # chỉ đọc, in báo cáo theo từng bộ
+python3 -m ingest.audit --slug one-punch-man
+```
+
+Nó lấy lại **tiêu đề thật** của từng video qua oEmbed công khai, parse lại bằng
+`parse_title` mới, rồi xếp mỗi link vào 4 nhóm:
+
+| Nhóm | Nghĩa | `--fix` làm gì |
+|---|---|---|
+| `xoa` | tiêu đề không nhận dạng được / bản gộp **một phần** | xoá link |
+| `gop_ca_bo` | là **bản gộp cả bộ** nhưng đang lưu thành tập N | sửa `episode_number = 0` |
+| `sai_so_tap` | tiêu đề nói tập khác | sửa số tập |
+| `vuot_tong` | tập > `episodes_total` của AniList → **nghi link thuộc bộ/mùa khác** | báo ra, chỉ xoá khi thêm `--prune-over-total` |
+
+```bash
+python3 -m ingest.audit --fix                      # lưu source_title + sửa/xoá
+python3 -m ingest.audit --fix --prune-over-total   # xoá luôn link vượt tổng
+```
+
+`--fix` cũng lưu `source_title` cho toàn bộ link cũ, nên lần sau audit chạy nhanh
+và không cần gọi mạng.
+
+**Sau lần chạy ĐẦU TIÊN bằng bản mới — dọn link cũ bị gán sai tập** (vd video gộp
+`Tập 01-24` từng bị lưu thành tập 1). Bản mới lưu `source_title` cho mọi link, nên
+dòng **không có** `source_title` chính là dòng do bản cũ tạo ra:
+
+```sql
+-- chạy SAU khi đã ingest lại cả 2 kênh thành công
+delete from streaming_links where kind = 'free_legal' and source_title is null;
+```
+
+Rồi kiểm:
+
+```sql
+select count(*) filter (where source_title is null) as con_cu,
+       count(*) filter (where episode_number = 0) as ban_gop_ca_bo
+from streaming_links where kind = 'free_legal';       -- con_cu phải = 0
 ```
 
 **3 lỗi hay gặp** (script `check_keys.sh` phân biệt được từng cái):
@@ -368,9 +485,36 @@ Kiểm bằng lệnh có sẵn:
 bash scripts/check_cron.sh          # exit 0 = cron chạy thật · exit 1 = cron chết
 ```
 
-Nếu `exit 1` sau vài giờ: dùng cron ngoài (cron-job.org) gọi
-`POST /repos/<owner>/<repo>/actions/workflows/ingest.yml/dispatches` với body
-`{"ref":"main"}` — script in sẵn câu lệnh mẫu.
+Nếu `exit 1` sau vài giờ: dùng **cron bên ngoài** gọi vào. Đã có script sẵn:
+
+```bash
+# 1. Tạo PAT: github.com/settings/tokens → Fine-grained
+#    Repository access: chỉ lxmtuu/Anistream
+#    Permissions → Actions: Read and write     (không cần quyền nào khác)
+export GH_TOKEN=github_pat_xxx
+
+# 2. Kích hoạt thử
+bash scripts/trigger_ingest.sh lxmtuu/Anistream all
+```
+
+**Cách A — cron-job.org (miễn phí, 5 phút):**
+
+| Trường | Giá trị |
+|---|---|
+| URL | `https://api.github.com/repos/lxmtuu/Anistream/actions/workflows/ingest.yml/dispatches` |
+| Method | **POST** |
+| Header | `Authorization: Bearer <PAT>` · `Accept: application/vnd.github+json` · `Content-Type: application/json` |
+| Body | `{"ref":"main","inputs":{"command":"all"}}` |
+| Lịch | mỗi 6 giờ (hoặc 3 lần/ngày) |
+
+Lưu ý: `command=all` chạy cả Job D/E/F (TMDB + mùa mới + Jikan) → 1 lần/ngày là đủ;
+các lần còn lại dùng `{"command":"schedule"}` cho nhẹ.
+
+**Cách B — pg_cron trong Supabase (không cần dịch vụ ngoài):** xem
+`supabase/CRON.sql` — tạo extension `pg_cron` + `pg_net`, lưu PAT trong bảng
+riêng có RLS bật, rồi `cron.schedule(...)` gọi đúng API trên.
+
+Sau khi đặt cron ngoài, kiểm lại bằng `bash scripts/check_cron.sh` (phải `exit 0`).
 
 ### 6c. Bật thông báo "tập mới vừa ra" (15 phút)
 

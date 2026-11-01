@@ -121,3 +121,25 @@ export function keysOf(
 export function recipientsFor(subs: Subscription[], animeId: number): number {
   return subs.filter((s) => s.anime_ids.includes(animeId)).length;
 }
+
+/**
+ * Cặp (anime_id, episode_number) duy nhất trong lô.
+ *
+ * Vì sao cần: `releaseReservations` từng xoá bằng `.in("anime_id", …).in("episode_number", …)`
+ * — hai `.in()` là phép AND nên nó xoá TÍCH CHÉO: bộ A tập 5 và bộ B tập 3 →
+ * xoá cả (A,3) và (B,5), tức là nhả quyền của những tập CHƯA hề gửi. Lần cron sau
+ * sẽ gửi trùng đúng những tập đó.
+ */
+export function episodePairs(
+  fresh: { anime_id: number; number: number }[],
+): { anime_id: number; number: number }[] {
+  const seen = new Set<string>();
+  const out: { anime_id: number; number: number }[] = [];
+  for (const e of fresh) {
+    const key = `${e.anime_id}:${e.number}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ anime_id: e.anime_id, number: e.number });
+  }
+  return out;
+}

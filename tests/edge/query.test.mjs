@@ -13,6 +13,7 @@ import {
   ilikeSafe,
   isRangeNotSatisfiable,
   resolveSort,
+  selectAll,
   toInt,
 } from "./.build/query.mjs";
 
@@ -73,4 +74,32 @@ test("currentSeason: tính theo UTC", () => {
   assert.equal(currentSeason(new Date("2026-04-15T00:00:00Z")), "SPRING");
   assert.equal(currentSeason(new Date("2026-08-15T00:00:00Z")), "SUMMER");
   assert.equal(currentSeason(new Date("2026-11-01T00:00:00Z")), "FALL");
+});
+
+test("selectAll: đọc hết nhiều trang (PostgREST cắt ở 1000 dòng)", async () => {
+  const all = Array.from({ length: 2345 }, (_, i) => i);
+  const calls = [];
+  const got = await selectAll(async (from, to) => {
+    calls.push([from, to]);
+    return { data: all.slice(from, to + 1), error: null };
+  });
+  assert.equal(got.length, 2345);
+  assert.deepEqual(calls, [[0, 999], [1000, 1999], [2000, 2999]]);
+});
+
+test("selectAll: dừng ngay khi trang ngắn", async () => {
+  const calls = [];
+  const got = await selectAll(async (from, to) => {
+    calls.push([from, to]);
+    return { data: from === 0 ? [1, 2, 3] : [], error: null };
+  });
+  assert.deepEqual(got, [1, 2, 3]);
+  assert.equal(calls.length, 1);
+});
+
+test("selectAll: lỗi query phải ném ra (không trả rỗng im lặng)", async () => {
+  await assert.rejects(
+    () => selectAll(async () => ({ data: null, error: { message: "boom" } })),
+    /boom/,
+  );
 });

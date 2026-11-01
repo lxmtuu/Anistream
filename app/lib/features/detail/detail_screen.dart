@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/theme.dart';
 import '../../core/models/anime.dart';
+import '../../core/models/episode_count.dart';
 import '../../core/models/episode_title.dart';
 import '../../core/models/genre_vi.dart';
 import '../../core/widgets/net_image.dart';
@@ -91,7 +92,12 @@ class _DetailBody extends ConsumerWidget {
     // Danh sách tập đến từ 2 nguồn: lịch phát TMDB/AniList (biết đủ số tập)
     // và link YouTube official (chỉ một phần tập có bản phát). Hiện cả hai con
     // số để người dùng không bấm nhầm vào tập chưa phát được.
-    final playableCount = anime.episodes.where((e) => e.playable).length;
+    // Entry `number == 0` là "bản gộp cả bộ" → KHÔNG tính vào số tập (nếu tính,
+    // bộ 12 tập hiện "Tập phim (13)"). Xem core/models/episode_count.dart.
+    final realCount = realEpisodeCount(anime.episodes.map((e) => e.number));
+    final playableCount =
+        anime.episodes.where((e) => e.playable && e.number > 0).length;
+    final hasBulk = anime.episodes.any((e) => e.playable && e.number == 0);
 
     return CustomScrollView(
       slivers: [
@@ -216,7 +222,9 @@ class _DetailBody extends ConsumerWidget {
                         '/watch?video=${ep.videoId}&title=${Uri.encodeComponent(anime.displayTitle)}',
                       ),
                       icon: const Icon(Icons.play_arrow_rounded),
-                      label: Text('Xem tập ${ep.number} · miễn phí'),
+                      label: Text(ep.number == 0
+                          ? 'Xem cả bộ · miễn phí'
+                          : 'Xem tập ${ep.number} · miễn phí'),
                     ),
                   )
                 else
@@ -317,22 +325,19 @@ class _DetailBody extends ConsumerWidget {
                     spacing: 8,
                     children: [
                       Text(
-                        'Tập phim (${anime.episodes.length})',
+                        episodesHeaderLabel(realCount),
                         style: const TextStyle(
                             fontSize: 14, fontWeight: FontWeight.w700),
                       ),
-                      if (playableCount > 0)
-                        Text(
-                          '· $playableCount tập xem được',
-                          style: const TextStyle(
-                              fontSize: 11.5, color: AppTheme.green),
-                        )
-                      else
-                        const Text(
-                          '· chưa có bản phát miễn phí',
-                          style: TextStyle(
-                              fontSize: 11.5, color: AppTheme.muted),
+                      Text(
+                        watchableSuffix(playableCount, hasBulk: hasBulk),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: playableCount > 0 || hasBulk
+                              ? AppTheme.green
+                              : AppTheme.muted,
                         ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 10),
@@ -366,7 +371,9 @@ class _DetailBody extends ConsumerWidget {
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text(e.airingAt == null
+                        content: Text(e.number == 0
+                            ? 'Bản gộp cả bộ chưa phát được trong app'
+                            : e.airingAt == null
                             ? 'Tập ${e.number} chưa có bản phát chính thức'
                             : e.airingAt!.isAfter(DateTime.now())
                                 ? 'Tập ${e.number} chiếu sau '
@@ -392,7 +399,7 @@ class _DetailBody extends ConsumerWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        e.number == 0 ? 'FULL' : '${e.number}',
+                        e.number == 0 ? 'CẢ BỘ' : '${e.number}',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,

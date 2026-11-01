@@ -167,7 +167,7 @@ class TestEpisodeRows(unittest.TestCase):
     def test_ten_rong_thanh_None(self):
         # "Tập 1" là placeholder (không phải tên thật) → None, xem TestCleanEpisodeTitle
         rows = tmdb.episode_rows(7, self.SEASON, True)
-        self.assertIsNone(rows[0]["title"])
+        self.assertNotIn("title", rows[0])   # placeholder → bỏ khoá, không gửi NULL
 
     def test_ten_that_duoc_giu(self):
         season = {"episodes": [{"episode_number": 1, "name": "Cơn mưa đầu mùa",
@@ -323,7 +323,7 @@ class TestCleanEpisodeTitle(unittest.TestCase):
              "air_date": "2018-01-15"},
         ]}
         rows = tmdb.episode_rows(9, season, single_season=True)
-        self.assertIsNone(rows[0]["title"])
+        self.assertNotIn("title", rows[0])   # placeholder → bỏ khoá, không gửi NULL
         self.assertEqual(rows[1]["title"], "Cuộc gặp ở phòng y tế")
 
 

@@ -58,6 +58,93 @@ Quy tắc **thà thiếu còn hơn sai**:
 Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API Key (v3)**.
 ⚠️ Không dùng "Read Access Token (v4)" — code gọi bằng `api_key`.
 
+## 9 job ingest
+
+| Job | Lệnh | Nguồn | Chạy |
+|---|---|---|---|
+| A | `schedule` | AniList lịch phát | 30 phút |
+| B | `catalog` | AniList theo mùa | hằng đêm |
+| C | `youtube` | Muse VN (YouTube) → `streaming_links` | 6 giờ |
+| C' | `episodes` | **link official → `episodes`** | 6 giờ + hằng ngày |
+| D | `tmdb` | TMDB: tiếng Việt + tập | hằng ngày |
+| D' | `tmdb --refresh` | TMDB: **tập MỚI** của bộ đang chiếu | hằng ngày |
+| E | `seasons` | AniList `relations` → **mùa thiếu** (SEQUEL + PREQUEL) | hằng ngày |
+| F | `jikan` | Jikan/MAL → lấp tập còn thiếu (`--fill-gaps`: cả bộ thiếu vài tập) | hằng ngày |
+| G | `check` | **kiểm bất biến dữ liệu**, vi phạm cứng → job ĐỎ | hằng ngày |
+
+`all` = A + B + C + C' + D + D' + E + F + G.
+
+### Vì sao cần D' và E (2 lỗi cũ)
+
+- **D'** — chế độ bổ sung chỉ chọn bộ `or=(title_vi.is.null, …)` và chỉ lấy tập khi
+  bảng **trống** → bộ đang chiếu đã có 5 tập thì KHÔNG BAO GIỜ nhận tập 6. `--refresh`
+  quét mọi bộ `status=RELEASING` và `upsert` tập mới (in `+ K tập MỚI`).
+- **E** — AniList tách mỗi mùa thành entry riêng, entry mùa 1 không có tập của mùa 2.
+  Job E đi theo quan hệ `SEQUEL` để thêm mùa mới (`+ mùa mới: … ← bộ gốc`).
+- **C'** — trước đây `episodes` CHỈ đến từ TMDB. Đo 01/11/2026: **23/27** bộ có
+  `streaming_links` nhưng bảng tập TRỐNG (`dandadan` 12 link/0 tập, `noblesse`
+  13/0) → trang chi tiết hiện "0 tập" dù có video. C' tạo tập từ chính link
+  `episode_number > 0`, **không** tạo tập vượt `episodes_total` (phần vượt được in
+  ra cảnh báo vì nghi link thuộc mùa khác), và không ghi đè tập đã có từ TMDB/Jikan.
+- **E** (chiều ngược) — Muse đăng mùa mới TRƯỚC, nên DB có "Ao no Hako Season 2"
+  mà thiếu hẳn mùa 1 (đo 01/11: 9/10 bộ có tên mùa đều thiếu mùa gốc). Bộ nào tên
+  có `Season N`/`Nnd Season`/`Mùa N`/`Part N` sẽ được đi thêm quan hệ `PREQUEL`.
+- **F** — AniList chỉ có tổng số tập, TMDB hay thiếu bản dịch. Jikan miễn phí, không
+  cần key, tra theo `mal_id` (bảng `anime` đã lưu từ `idMal`) → lấp `title` + `aired`.
+  Bỏ tập `filler` và tập vượt `episodes_total`.
+
+### Vì sao có Job G (và 3 lỗi "âm thầm" khác đã vá 02/11/2026)
+
+Rà lại toàn pipeline thấy 4 chỗ hỏng mà **không chỗ nào báo lỗi**:
+
+| Lỗi | Hậu quả thật trên DB | Bản vá |
+|---|---|---|
+| `to_anime_row` gửi khoá `None` khi AniList trả rỗng | upsert merge-duplicates ghi NULL đè `episodes_total`/`cover_url`/`score` mỗi 30 phút. Đo 02/11: **3 bộ có 12–13 tập đầy đủ (từ TMDB) mà `episodes_total` = NULL** — khớp với việc bị ghi đè; và **126/126 bộ `last_synced_at` = NULL** (chắc chắn, cột không có default) | Bỏ khoá rỗng khỏi payload + tự set `last_synced_at` |
+| `to_episode_row` gửi `title: None` | job A xoá tên tập TMDB/Jikan đã điền | Bỏ khoá khi rỗng (cả ở `tmdb.episode_rows`, `jikan.episode_rows`) |
+| Không phân trang khi đọc PostgREST | Supabase cắt ở **1000 dòng**; `limit=20000` vẫn chỉ 1000 → job C' coi bộ sau dòng 1000 là "chưa có tập", job E báo nhầm "mùa mới" | `DB.select_all()` tự limit+offset, dùng ở C'/E/audit |
+| `jikan` bỏ qua mọi bộ đã có ≥1 tập | 33 bộ thiếu vài tập không bao giờ được lấp | cờ `--fill-gaps` (chỉ thêm số tập còn thiếu) |
+
+Job G kiểm: tập vượt tổng, tập đánh số ≤ 0, slug trùng, một URL gắn 2 bộ, dòng mồ
+côi (cứng) và link vượt tổng / bộ có link mà 0 tập / bộ không rõ tổng (mềm).
+
+### Edge Function: 3 chỗ cắt dữ liệu ở 1000 dòng (vá 02/11/2026)
+
+PostgREST của Supabase có "Max Rows" = **1000**: `.limit(1200)` vẫn chỉ trả 1000
+dòng. Ba API đang dựa vào limit cứng nên khi dữ liệu lớn lên sẽ **thiếu tập một
+cách âm thầm** (bộ nằm sau dòng 1000 hiện "0 tập"):
+
+| API | Trước | Sau |
+|---|---|---|
+| `/home` | `episodes` `.limit(1200)`, `links` `.limit(1200)`, `free_legal` `.limit(300)` | `selectAll()` đọc hết trang; shelf "Xem ngay" không còn mất bộ (DB đã có **485** link free) |
+| `/anime` | `episodes`/`links` `.limit(600)` | `selectAll()` theo `order` ổn định |
+| `/search` | `episodes`/`links` `.limit(600)` cho tới 48 bộ | `selectAll()` |
+
+Kèm 2 lỗi nữa cùng đợt:
+- **Chọn video theo region**: một tập có cả bản VN và bản Asia thì ai "thắng" là
+  ngẫu nhiên (thứ tự PostgREST không đảm bảo) → nay ưu tiên `VN`, rồi `AS`.
+- **`push` nhả reservation sai**: xoá bằng 2 lần `.in()` = AND → xoá tích chéo
+  `(A,3)`, `(B,5)` của những tập CHƯA gửi ⇒ cron sau gửi trùng. Nay xoá từng cặp.
+- **Số tập trên app** đếm cả entry 0 ("bản gộp cả bộ") → bộ 12 tập hiện
+  "Tập phim (13)". Nay đếm bằng `realEpisodeCount()`.
+
+⚠️ Sau khi `git pull`, phải deploy lại edge function thì thay đổi mới có hiệu lực:
+
+```bash
+supabase functions deploy home search schedule anime push
+```
+
+### Cron: GitHub không đủ tin cậy
+
+Đo thật ngày 01/11/2026: workflow "active" nhưng `event=schedule` = **0 run/10h**.
+Hai cách thay thế (đều kèm trong repo):
+
+```bash
+bash scripts/trigger_ingest.sh lxmtuu/Anistream all   # cần GH_TOKEN (Actions: write)
+```
+
+- **cron-job.org** — POST tới `…/dispatches` (xem bảng trong `BAN_LAM_TIEP.md` §6b)
+- **pg_cron trong Supabase** — chạy `supabase/CRON.sql` (không cần dịch vụ ngoài)
+
 ## Job C hoạt động thế nào (và vì sao hợp pháp)
 
 ```
@@ -68,6 +155,36 @@ https://www.youtube.com/feeds/videos.xml?channel_id=UC...   (oEmbed không đả
 - Video là do **chủ kênh đăng công khai**; app chỉ **nhúng bằng IFrame Player API chính thức**.
 - **Không** trích xuất stream (không `youtube_explode`, không `yt-dlp`) → không vi phạm ToS YouTube.
 - oEmbed chỉ là kiểm tra sơ bộ; HTTP 200 không đảm bảo video nhúng được hoặc không bị chặn theo vùng.
+
+### Chỉ dùng kênh Muse Việt Nam
+
+Mặc định ingest **chỉ lấy Muse Việt Nam** (kênh có bản Việt sub/lồng tiếng):
+
+```bash
+# .env — muốn bật thêm kênh khác thì liệt kê, cách nhau bằng dấu phẩy
+YOUTUBE_CHANNELS=muse_vn
+# YOUTUBE_CHANNELS=muse_vn,ani_one_asia
+```
+
+Tên kênh sai chính tả → nổ ngay kèm danh sách hợp lệ (không "chạy xong mà không
+lấy được gì").
+
+### Xếp đúng BỘ và MÙA cho Muse VN
+
+Muse đăng theo mùa: `One Punch Man - Mùa 2 - Tập 5`, `Fairy Tail (S3) - Tập 51`.
+AniList tách mỗi mùa thành entry riêng, nên phải chọn đúng entry:
+
+| Luật | Ví dụ |
+|---|---|
+| `parse_title` đọc mùa từ `Mùa 2` / `Season 2` / `Phần 2` / `(S2)` | `series_base` = tên không kèm mùa |
+| Đọc **năm** trong tiêu đề (`(2011)`, `2014`) | `Hunter x Hunter (2011)` → `year_hint=2011` |
+| Có mùa > 1 → **chỉ** nhận entry có ghi mùa đó | `One Punch Man 2nd Season` |
+| Chưa có entry mùa đó → **không** gán vào mùa 1 | báo "chưa có entry mùa 2 (AniList)" |
+| Loại entry không đủ chỗ cho tập | `Hunter x Hunter` 1999 (62 tập) bị loại khi có tập 148 |
+| Tập > tổng số tập của bộ → **không ghi** | in `⚠ series có tập VƯỢT tổng số tập` |
+
+Nhờ vậy 2 lỗi thật đã hết: 86 link tập 63–148 bị nhét vào entry 62 tập, và 102 link
+tập 176–277 bị nhét vào entry 175 tập.
 
 ### Backfill toàn bộ lịch sử kênh (quan trọng!)
 
@@ -135,6 +252,29 @@ Lấy `channel_id` (không phải `@handle`):
 curl -s "https://www.youtube.com/@TenKenh" | grep -o '"channelId":"UC[^"]*"' | head -1
 ```
 Thêm vào `youtube.py` → `CHANNELS` với `key`, `name`, `channel_id`, `region`.
+
+### Bản gộp nhiều tập (quan trọng)
+
+Muse/Ani-One hay đăng **1 video chứa cả bộ** hoặc **một dải tập**:
+
+| Tiêu đề | Trước đây | Bây giờ |
+|---|---|---|
+| `[Bản Lồng Tiếng] One Punch Man - Tập 01-24` | `episode=1` ❌ (app ghi "Tập 1", bấm vào ra video 24 tập, còn **ghi đè** link tập 1 thật) | `episode=0` → hiện thành ô **CẢ BỘ**, đứng cuối danh sách |
+| `鬼滅の刃 第01-26話` | không parse được → mất | `episode=0` |
+| `Crayon Shin-chan Tập 1000-1099` | `episode=1000` ❌ | **bỏ** (bản gộp một phần: không có số tập nào đúng) |
+| `One Punch Man Tập 5-8` | `episode=5` ❌ | **bỏ** |
+
+Nguyên tắc: chỉ nhận dải tập khi nó **bắt đầu từ tập 1** (cả bộ). Dải bắt đầu từ giữa
+thì gán số nào cũng sai → bỏ, thà thiếu còn hơn sai.
+
+Để truy ngược khi số tập bị parse sai, mỗi link lưu thêm `source_title` = tiêu đề
+YouTube gốc. Kiểm:
+
+```sql
+select a.slug, l.episode_number, left(l.source_title, 50) as tieu_de
+from streaming_links l join anime a on a.id = l.anime_id
+where l.source_title ilike '%tập%' and l.episode_number = 0;
+```
 
 ### Khi log báo "chưa khớp"
 Tên tiếng Trung không search được trên AniList → thêm vào `aliases.json`:

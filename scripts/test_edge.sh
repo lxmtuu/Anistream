@@ -15,7 +15,7 @@ OUT="tests/edge/.build"
 mkdir -p "$OUT"
 
 echo "▶ Transpile TS → JS (esbuild)"
-for f in push_plan query; do
+for f in push_plan query assemble; do
   npx --yes esbuild@0.23.1 \
     "supabase/functions/_shared/$f.ts" \
     --bundle --format=esm --platform=neutral \

@@ -44,8 +44,18 @@ def simplify(text: str) -> str:
     return (text or "").translate(T2S)
 
 
+# "Mùa 2"/"Phần 2" (Muse VN dùng tiếng Việt) và "Season 2"/"(S2)". Phải bỏ TRƯỚC
+# khi normalize, vì norm() xoá dấu tiếng Việt → "mùa 2" thành "m a 2" và số "2"
+# còn lại làm lệch điểm giữa "One Punch Man" và "One Punch Man - Mùa 2".
+_SEASON_MARK = re.compile(
+    r"(?:^|[\s\-–—:|])(?:mùa|mua|phần|phan|season)\s*\d{1,2}\b|\(s\d{1,2}\)",
+    re.IGNORECASE,
+)
+
+
 def norm(s: str) -> str:
-    s = unicodedata.normalize("NFKC", s or "").lower()
+    s = _SEASON_MARK.sub(" ", s or "")
+    s = unicodedata.normalize("NFKC", s).lower()
     s = ARTICLES.sub("", s)
     s = re.sub(r"\b(season|phần|part|s)\s*\d+\b", " ", s)
     s = re.sub(r"\b\d+(st|nd|rd|th)\s*season\b", " ", s)
@@ -274,6 +284,97 @@ def resolve(name: str, cache: Dict[str, Optional[Dict]],
 
     cache[key] = None
     return None, score, "—"
+
+
+# ─────────────────────────────────────────── chọn đúng BỘ / MÙA cho Muse VN
+# Muse VN đăng theo mùa: "One Punch Man - Mùa 2 - Tập 5", "Fairy Tail (S3) - Tập 51".
+# AniList tách mỗi mùa thành entry riêng, và entry mùa 1 KHÔNG chứa tập của mùa 2.
+# Trước đây mọi link được gán vào entry khớp tên nhất → "Hunter x Hunter (bản 2011,
+# 148 tập)" bị nhét vào entry 1999 (62 tập), "Fairy Tail 277 tập" vào entry 175 tập.
+SEASON_IN_TITLE = {
+    2: re.compile(r"(?:2nd\s+season|season\s*2|mùa\s*2|\bii\b|\b2$)", re.I),
+    3: re.compile(r"(?:3rd\s+season|season\s*3|mùa\s*3|\biii\b|\b3$)", re.I),
+    4: re.compile(r"(?:4th\s+season|season\s*4|mùa\s*4|\biv\b|\b4$)", re.I),
+}
+
+
+def _titles(media: Dict) -> List[str]:
+    t = media.get("title") or {}
+    return [x for x in (t.get("romaji"), t.get("english"), t.get("native")) if x]
+
+
+def _year(media: Dict) -> Optional[int]:
+    sd = media.get("startDate") or {}
+    if isinstance(sd.get("year"), int):
+        return sd["year"]
+    for k in ("seasonYear", "year"):
+        if isinstance(media.get(k), int):
+            return media[k]
+    return None
+
+
+def looks_like_season(media: Dict, season: int) -> bool:
+    """Tên của media có ghi đây là mùa `season` không?"""
+    rx = SEASON_IN_TITLE.get(season)
+    if not rx:
+        rx = re.compile(rf"(?:season\s*{season}|mùa\s*{season})", re.I)
+    return any(rx.search(t) for t in _titles(media))
+
+
+def fits_episode(media: Dict, max_episode: int, tolerance: int = 0) -> bool:
+    """Bộ này CÓ thể chứa tập `max_episode` không? (chưa biết tổng → cho qua)"""
+    total = media.get("episodes")
+    if not isinstance(total, int) or total <= 0:
+        return True
+    return max_episode <= total + tolerance
+
+
+def choose_entry(
+    candidates: List[Dict],
+    base: str,
+    season: Optional[int] = None,
+    max_episode: int = 0,
+    year_hint: Optional[int] = None,
+) -> Tuple[Optional[Dict], str]:
+    """Chọn entry AniList cho 1 series của Muse, có xét MÙA / NĂM / SỐ TẬP.
+
+    Thứ tự:
+      1. Đúng mùa (tên có "Season 2"/"Mùa 2"/"II") VÀ đủ chỗ cho tập lớn nhất.
+         Nhiều ứng viên → ưu tiên năm khớp `year_hint`, rồi popularity.
+      2. Không có mùa trong tiêu đề → entry khớp tên nhất mà **đủ chỗ chứa tập**.
+         (Đây là chỗ sửa lỗi Hunter x Hunter/Fairy Tail: entry 62 tập bị loại vì
+         Muse có tập 148, chọn entry 148 tập.)
+      3. Không có ứng viên nào đủ chỗ → None (job sẽ báo "cần xác định", KHÔNG ghi bừa).
+    """
+    if not candidates:
+        return None, "không có ứng viên"
+
+    def score(m: Dict) -> float:
+        return max((similarity(base, t) for t in _titles(m)), default=0.0)
+
+    pool = [c for c in candidates if fits_episode(c, max_episode)]
+
+    if season and season > 1:
+        same_season = [c for c in pool if looks_like_season(c, season)]
+        if same_season:
+            same_season.sort(key=lambda m: (-
+                (1 if year_hint and _year(m) == year_hint else 0),
+                -(m.get("popularity") or 0)))
+            return same_season[0], f"mùa {season}"
+        # Chưa có entry mùa đó trên AniList → thà báo thiếu còn hơn gán vào mùa 1
+        return None, f"chưa có entry mùa {season} (AniList)"
+
+    if not pool:
+        totals = sorted({c.get("episodes") for c in candidates
+                         if isinstance(c.get("episodes"), int)})
+        return None, (f"không entry nào đủ {max_episode} tập "
+                      f"(các bộ cùng tên có: {totals or 'không rõ'})")
+
+    ranked = sorted(pool, key=score, reverse=True)
+    best = ranked[0]
+    if score(best) < THRESHOLD:
+        return None, f"tên không khớp (điểm {score(best):.2f})"
+    return best, f"khớp tên {score(best):.2f}"
 
 
 def rank_candidates(name: str, candidates: List[Dict]) -> List[Tuple[Dict, float]]:

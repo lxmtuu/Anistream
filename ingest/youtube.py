@@ -27,6 +27,25 @@ CHANNELS: List[Dict] = [
     # Thêm kênh khác tại đây. Lấy channel_id bằng: curl -s <url kênh> | grep -o '"channelId":"UC[^"]*"'
 ]
 
+
+def enabled_channels() -> List[Dict]:
+    """Kênh đang bật, theo `YOUTUBE_CHANNELS` (mặc định chỉ `muse_vn`).
+
+    Tên kênh sai chính tả mà im lặng bỏ qua là kiểu lỗi tệ nhất (chạy "thành công"
+    mà không lấy được gì) → nổ ngay kèm danh sách hợp lệ.
+    """
+    wanted, out = config.YOUTUBE_CHANNELS, []
+    known = {c["key"]: c for c in CHANNELS}
+    unknown = [k for k in wanted if k not in known]
+    if unknown:
+        raise RuntimeError(
+            f"YOUTUBE_CHANNELS có kênh không tồn tại: {', '.join(unknown)}. "
+            f"Hợp lệ: {', '.join(known)}"
+        )
+    for k in wanted:
+        out.append(known[k])
+    return out
+
 # Tiêu đề chứa các từ này → KHÔNG phải tập phim đầy đủ → bỏ
 SKIP_WORDS = [
     "shorts", "trailer", "teaser", "pv", "預告", "預告片", "精華", "精華重溫",
@@ -37,11 +56,22 @@ SKIP_WORDS = [
 ]
 
 # 第12話 / 第12话 / 第12集  |  Episode 12 |  - Ep 12 |  (S1E12)
-RE_CN_EP = re.compile(r"第\s*(\d{1,4})\s*[話话集]")
-RE_VI_EP = re.compile(r"(?:^|[\s\-–—:|])tập\s*(\d{1,4})(?!\d)", re.IGNORECASE)
-RE_EN_EP = re.compile(r"(?:^|[\s\-–—:|])episode\s*(\d{1,4})", re.IGNORECASE)
+# Dải tập: "Tập 01-24", "第01-26話", "Ep 5-8". Muse/Ani-One hay đăng BẢN GỘP nhiều
+# tập trong 1 video. Ca thật: "[Bản Lồng Tiếng] One Punch Man - Tập 01-24" từng bị
+# parse thành episode 1 → app ghi "Tập 1" nhưng bấm vào là video 24 tập.
+_RANGE = r"(?:\s*[-–—~]\s*(\d{1,4}))?"
+RE_CN_EP = re.compile(r"第\s*(\d{1,4})" + _RANGE + r"\s*[話话集]")
+RE_VI_EP = re.compile(r"(?:^|[\s\-–—:|])tập\s*(\d{1,4})" + _RANGE + r"(?!\d)",
+                      re.IGNORECASE)
+RE_EN_EP = re.compile(r"(?:^|[\s\-–—:|])(?:episode|ep)\.?\s*(\d{1,4})" + _RANGE,
+                      re.IGNORECASE)
 RE_SxE   = re.compile(r"\(S\d+\s*E(\d{1,3})\)", re.IGNORECASE)
-RE_SEASON = re.compile(r"\(S(\d+)\)\s*$")
+# Mùa được viết nhiều kiểu; Muse VN dùng "Mùa 2" (tiếng Việt) là chính.
+RE_SEASON = re.compile(
+    r"(?:\(S(?P<paren>\d+)\)"
+    r"|(?:^|[\s\-–—:|])(?:mùa|mua|season|phần|phan)\s*(?P<word>\d{1,2})\b)",
+    re.IGNORECASE,
+)
 
 BRACKETS = [
     re.compile(r"【[^】]*】"), re.compile(r"\[[^\]]*\]"),
@@ -69,20 +99,43 @@ def parse_title(raw: str) -> Optional[Dict]:
     if not title or is_skippable(title):
         return None
 
+    # Năm trong tiêu đề ("Hunter x Hunter (2011)", "Fairy Tail 2014") là thông tin
+    # rất mạnh để phân biệt bản 1999 và bản 2011 — lấy TRƯỚC khi xoá ngoặc.
+    m_year = re.search(r"\(((?:19|20)\d{2})\)|(?<!\d)((?:19|20)\d{2})(?!\d)", title)
+    year = None
+    if m_year:
+        raw_year = "".join(g for g in m_year.groups() if g)
+        year = int(raw_year) if len(raw_year) == 4 else None
+        if year and not (1950 <= year <= 2100):
+            year = None
+
     season = None
     m_season = RE_SEASON.search(title)
     if m_season:
-        season = int(m_season.group(1))
+        season = int(m_season.group("paren") or m_season.group("word"))
 
-    # 1) số tập
+    # 1) số tập (có thể là DẢI TẬP — xem `_RANGE`)
     episode = 0
     cut_at = None
-    for rx, group in ((RE_CN_EP, 1), (RE_VI_EP, 1), (RE_EN_EP, 1), (RE_SxE, 1)):
+    for rx in (RE_CN_EP, RE_VI_EP, RE_EN_EP, RE_SxE):
         m = rx.search(title)
-        if m:
-            episode = int(m.group(group))
-            cut_at = m.start()
-            break
+        if not m:
+            continue
+        groups = m.groups()
+        start = int(groups[0])
+        end = int(groups[1]) if len(groups) > 1 and groups[1] else None
+        if end is not None and end > start:
+            if start <= 1:
+                # Bản gộp CẢ BỘ → đúng nghĩa "link cho cả bộ" (episode_number = 0).
+                episode = 0
+            else:
+                # Bản gộp MỘT PHẦN (vd "Tập 1000-1099"): không có số tập nào đúng
+                # để gán. Gán start sẽ nói dối và ghi đè link tập thật → bỏ qua.
+                return None
+        else:
+            episode = start
+        cut_at = m.start()
+        break
 
     # 2) tên series = phần trước chỗ có số tập
     head = title[:cut_at] if cut_at is not None else title
@@ -93,12 +146,17 @@ def parse_title(raw: str) -> Optional[Dict]:
     head = re.sub(r"^[\s\-–—:|]+", "", head)
     head = re.sub(r"[\s\-–—:|]+$", "", head)
     head = re.sub(r"\s{2,}", " ", head).strip()
+    # tên gốc không kèm "Mùa 2" — dùng để tìm bộ trên AniList khi bộ mùa đó
+    # chưa có trong DB
+    base = RE_SEASON.sub(" ", head)
+    base = re.sub(r"[\s\-–—:|]+$", "", re.sub(r"^[\s\-–—:|]+", "", base)).strip()
 
     if len(head) < 2:
         return None
 
     kind = "episode" if episode > 0 else "series"
-    return {"series": head, "episode": episode, "season": season, "kind": kind}
+    return {"series": head, "series_base": base or head,
+            "episode": episode, "season": season, "year_hint": year, "kind": kind}
 
 
 def fetch_rss(channel_id: str, limit: int = 25) -> List[Dict]:

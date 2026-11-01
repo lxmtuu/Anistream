@@ -18,6 +18,7 @@ import {
   ilikeSafe,
   isRangeNotSatisfiable,
   resolveSort,
+  selectAll,
   toInt,
 } from "../_shared/query.ts";
 
@@ -95,22 +96,31 @@ Deno.serve(
     let linksByAnime = new Map<number, LinkRow[]>();
 
     if (ids.length > 0) {
-      const [epRes, linkRes] = await Promise.all([
-        sb
-          .from("episodes")
-          .select("anime_id, number, title, airing_at")
-          .in("anime_id", ids)
-          .order("number", { ascending: true })
-          .limit(600),
-        sb
-          .from("streaming_links")
-          .select("anime_id, episode_number, platform, region, url, kind, is_verified")
-          .in("anime_id", ids)
-          .eq("is_verified", true)
-          .limit(600),
+      // 48 bộ × tối đa 180 tập (One Piece, Xian Ni) vượt xa 1000 dòng mà
+      // PostgREST trả về → phải đọc hết trang, không dùng limit cứng.
+      const [episodeRows, linkRows] = await Promise.all([
+        selectAll<EpisodeRow>((from, to) =>
+          sb
+            .from("episodes")
+            .select("anime_id, number, title, airing_at")
+            .in("anime_id", ids)
+            .order("anime_id", { ascending: true })
+            .order("number", { ascending: true })
+            .range(from, to)
+        ),
+        selectAll<LinkRow>((from, to) =>
+          sb
+            .from("streaming_links")
+            .select("anime_id, episode_number, platform, region, url, kind, is_verified")
+            .in("anime_id", ids)
+            .eq("is_verified", true)
+            .order("anime_id", { ascending: true })
+            .order("episode_number", { ascending: true })
+            .range(from, to)
+        ),
       ]);
-      epsByAnime = groupByAnime((epRes.data ?? []) as EpisodeRow[]);
-      linksByAnime = groupByAnime((linkRes.data ?? []) as LinkRow[]);
+      epsByAnime = groupByAnime(episodeRows);
+      linksByAnime = groupByAnime(linkRows);
     }
 
     const items = rows.map((r) =>

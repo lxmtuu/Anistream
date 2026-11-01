@@ -11,6 +11,7 @@ import {
   buildPayload,
   displayTitle,
   episodeKey,
+  episodePairs,
   keysOf,
   planMessages,
   recipientsFor,
@@ -149,4 +150,16 @@ test("recipientsFor đếm đúng số thiết bị theo dõi 1 bộ", () => {
   assert.equal(recipientsFor(subs, 100), 2);
   assert.equal(recipientsFor(subs, 300), 1);
   assert.equal(recipientsFor(subs, 999), 0);
+});
+
+test("episodePairs: chỉ nhả đúng cặp (anime, tập), không nhả tích chéo", () => {
+  const pairs = episodePairs([
+    { anime_id: 1, number: 5 },
+    { anime_id: 2, number: 3 },
+    { anime_id: 1, number: 5 }, // trùng
+  ]);
+  assert.deepEqual(pairs, [
+    { anime_id: 1, number: 5 },
+    { anime_id: 2, number: 3 },
+  ]);
 });

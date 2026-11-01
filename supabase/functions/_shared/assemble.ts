@@ -125,9 +125,15 @@ export function toAnimeDto(
   const freeLinks = verified.filter((l) => l.kind === "free_legal");
   const officialLinks = verified.filter((l) => l.kind === "official");
 
-  // video_id theo số tập (0 = full bộ)
+  // video_id theo số tập (0 = full bộ).
+  // Thứ tự `links` do PostgREST trả về KHÔNG xác định → nếu một tập có cả bản VN
+  // và bản Asia (Ani-One), ai "thắng" là ngẫu nhiên. Ưu tiên region VN trước.
+  const regionRank = (r?: string | null) => (r === "VN" ? 0 : r === "AS" ? 1 : 2);
+  const orderedFree = [...freeLinks].sort(
+    (a, b) => regionRank(a.region) - regionRank(b.region),
+  );
   const videoByEpisode = new Map<number, { id: string; platform: string }>();
-  for (const l of freeLinks) {
+  for (const l of orderedFree) {
     const vid = l.platform === "youtube" ? youtubeId(l.url) : null;
     if (vid && !videoByEpisode.has(l.episode_number)) {
       videoByEpisode.set(l.episode_number, { id: vid, platform: l.platform });
@@ -155,12 +161,15 @@ export function toAnimeDto(
   }
   eps.sort((a, b) => a.number - b.number);
 
-  // có link free cho cả bộ (episode_number = 0) mà không có episodes → tạo 1 entry FULL
-  if (eps.length === 0 && videoByEpisode.has(0)) {
+  // Link cho CẢ BỘ (episode_number = 0, vd "[Bản Lồng Tiếng] One Punch Man - Tập 01-24"
+  // là 1 video 24 tập) phải luôn hiện, kể cả khi bộ đã có danh sách tập.
+  // Bản cũ chỉ thêm khi `eps.length === 0` → người dùng mất hẳn bản gộp.
+  // Đặt CUỐI danh sách để "Xem ngay" vẫn trỏ vào tập 1 (không phải video 24 tập).
+  if (videoByEpisode.has(0) && !eps.some((e) => e.number === 0)) {
     const v = videoByEpisode.get(0)!;
     eps.push({
       number: 0,
-      title: "Full",
+      title: "Cả bộ",
       video_id: v.id,
       platform: v.platform,
       airing_at: null,

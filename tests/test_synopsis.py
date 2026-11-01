@@ -67,7 +67,9 @@ class TestAnimeRowSynopsis(unittest.TestCase):
         )
 
     def test_khong_co_description_thi_none(self):
-        self.assertIsNone(to_anime_row(self._media(description=None))["synopsis_original"])
+        # Khoá rỗng bị BỎ khỏi payload (upsert merge-duplicates sẽ ghi NULL đè
+        # mô tả tốt đã có nếu ta gửi `synopsis_original: None`).
+        self.assertNotIn("synopsis_original", to_anime_row(self._media(description=None)))
 
     def test_khong_ghi_de_synopsis_vi(self):
         # ingest KHÔNG được tự bịa bản dịch: cột tiếng Việt chỉ do người/dịch điền

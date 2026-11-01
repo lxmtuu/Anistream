@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/theme.dart';
 import '../../core/models/anime.dart';
+import '../../core/models/episode_count.dart';
 import '../../core/widgets/net_image.dart';
 import '../../data/anime_repository.dart';
 
@@ -153,7 +154,8 @@ class LibraryScreen extends ConsumerWidget {
                     style: const TextStyle(
                         fontSize: 13, fontWeight: FontWeight.w600)),
                 subtitle: Text(
-                  '${a.episodes.length} tập · ${a.isFree ? "có bản miễn phí" : "nền tảng khác"}',
+                  '${realEpisodeCount(a.episodes.map((e) => e.number))} tập · '
+                  '${a.isFree ? "có bản miễn phí" : "nền tảng khác"}',
                   style: const TextStyle(fontSize: 11, color: AppTheme.muted),
                 ),
                 trailing: IconButton(

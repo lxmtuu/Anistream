@@ -16,7 +16,7 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from ingest import main as ingest_main
-from ingest import match, youtube
+from ingest import config, match, youtube
 
 
 class FakeDB:
@@ -40,6 +40,9 @@ class FakeDB:
         return 1
 
     def select(self, table, query):
+        return []
+
+    def select_all(self, table, query, page_size=1000, max_rows=200000):
         return []
 
     def log_ingest(self, source, job, ok, rows, error=""):
@@ -69,6 +72,8 @@ class TestJobYoutubePerChannel(unittest.TestCase):
         self.cache_path = os.path.join(self.tmpdir, "match_cache.json")
         self.patches = [
             patch.object(youtube, "CHANNELS", [CH1, CH2]),
+            # chỉ Muse VN là mặc định; test này kiểm cơ chế nhiều kênh nên bật cả 2
+            patch.object(config, "YOUTUBE_CHANNELS", ["muse_vn", "ani_one_asia"]),
             patch.object(match, "default_cache_path", return_value=self.cache_path),
         ]
         for p in self.patches:

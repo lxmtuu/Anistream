@@ -5,7 +5,7 @@ Miễn phí, không cần key. Giới hạn ~30–90 request/phút → có retry
 import datetime as dt
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from . import config
@@ -134,6 +134,56 @@ def search_media(title: str, per_page: int = 5) -> List[Dict]:
 
 
 # ──────────────────────────────────────────────────────────
+# Mùa MỚI: AniList ghi quan hệ PREQUEL/SEQUEL giữa các entry. Đây là cách DUY NHẤT
+# biết "bộ này vừa có mùa 2" mà không phải thêm tay từng bộ: mỗi mùa là một entry
+# riêng, và entry mùa 1 KHÔNG tự có tập của mùa 2.
+def related(media_id: int,
+            kinds: Tuple[str, ...] = ("SEQUEL",)) -> List[Dict]:
+    """Các entry có quan hệ thuộc `kinds` (SEQUEL / PREQUEL / …) với `media_id`."""
+    q = """
+    query($id:Int){
+      Media(id:$id, type:ANIME){
+        id
+        relations{
+          edges{
+            relationType(version:2)
+            node{ %s }
+          }
+        }
+      }
+    }""" % MEDIA_FIELDS
+    data = gql(q, {"id": media_id})
+    edges = (((data.get("Media") or {}).get("relations") or {}).get("edges") or [])
+    wanted = {k.upper() for k in kinds}
+    out = []
+    for e in edges:
+        if (e.get("relationType") or "").upper() not in wanted:
+            continue
+        node = e.get("node") or {}
+        if node.get("id"):
+            out.append(node)
+    return out
+
+
+def sequels(media_id: int) -> List[Dict]:
+    """Các entry là SEQUEL (mùa sau) của `media_id`."""
+    return related(media_id, ("SEQUEL",))
+
+
+def prequels(media_id: int) -> List[Dict]:
+    """Các entry là PREQUEL (mùa TRƯỚC) của `media_id`.
+
+    Cần vì Muse đăng mùa mới nhất trước, nên DB có "Ao no Hako Season 2" mà KHÔNG
+    có mùa 1 — người dùng bấm vào bộ là thấy thiếu hẳn phần đầu.
+    """
+    return related(media_id, ("PREQUEL",))
+
+
+def is_series_like(media: Dict) -> bool:
+    """SEQUEL dạng TV/ONA mới là 'mùa mới'; MOVIE/SPECIAL thì không cùng danh sách tập."""
+    return (media.get("format") or "").upper() in ("TV", "TV_SHORT", "ONA")
+
+
 def season_of(month: int) -> str:
     if month in (1, 2, 3):
         return "WINTER"
@@ -167,11 +217,32 @@ def slugify(text: str, fallback_id: int) -> str:
     return s or f"anime-{fallback_id}"
 
 
+# Khoá BẮT BUỘC phải có trong payload (NOT NULL ở DB, hoặc giá trị 0/rỗng là hợp lệ).
+_KEEP_EMPTY = {"anilist_id", "slug", "title_romaji", "source", "popularity", "genres"}
+
+
+def _drop_empty(row: Dict) -> Dict:
+    """Bỏ khoá rỗng/None khỏi payload upsert.
+
+    Vì sao: PostgREST `Prefer: resolution=merge-duplicates` ghi ĐÈ mọi cột có mặt
+    trong payload. `to_anime_row` gửi `episodes_total`, `cover_url`, `score`…
+    kể cả khi AniList trả `null` → mỗi lần job A/B chạy (30 phút/lần) là một lần
+    XOÁ số tập / ảnh bìa mà TMDB vừa điền. Đo 01/11/2026: 8 bộ có 12–13 tập
+    nhưng `episodes_total` = NULL, và cả 126 bộ `last_synced_at` = NULL.
+    """
+    return {k: v for k, v in row.items()
+            if k in _KEEP_EMPTY or v not in (None, "", [], {})}
+
+
 def to_anime_row(m: Dict) -> Dict:
-    """Chuẩn hoá media của AniList → row cho bảng `anime`."""
+    """Chuẩn hoá media của AniList → row cho bảng `anime`.
+
+    Trả về payload ĐÃ BỎ khoá rỗng (xem `_drop_empty`) để upsert không xoá dữ
+    liệu tốt đã có từ nguồn khác.
+    """
     t = m.get("title") or {}
     studio_nodes = ((m.get("studios") or {}).get("nodes") or [])
-    return {
+    row = {
         "anilist_id": m["id"],
         "mal_id": m.get("idMal"),
         "slug": slugify(t.get("romaji") or t.get("english") or "", m["id"]),
@@ -197,8 +268,11 @@ def to_anime_row(m: Dict) -> Dict:
         "synopsis_original": clean_html(m.get("description")),
         "studios": [n["name"] for n in studio_nodes if n.get("name")],
         "source": "anilist",
-        "last_synced_at": None,   # Postgres tự set bằng now() ở tầng dưới
+        # Cột này KHÔNG có default ở DB (suốt 126/126 bộ luôn NULL) → phải tự set,
+        # nếu không thì không ai biết bộ nào đã được đồng bộ lần cuối khi nào.
+        "last_synced_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     }
+    return _drop_empty(row)
 
 
 def to_iso(ts: Any) -> Optional[str]:
@@ -214,9 +288,16 @@ def to_iso(ts: Any) -> Optional[str]:
 
 
 def to_episode_row(anime_id: int, number: int, airing_at: Any, title: str = "") -> Dict:
-    return {
-        "anime_id": anime_id,
-        "number": number,
-        "airing_at": to_iso(airing_at),
-        "title": title or None,
-    }
+    """Row cho bảng `episodes` — CHỈ gồm cột thật sự có dữ liệu.
+
+    `title`/`airing_at` rỗng bị BỎ HẲN khỏi payload, vì upsert merge-duplicates
+    sẽ ghi NULL đè lên tên tập do TMDB/Jikan điền. Trước đây job A (mỗi 30 phút)
+    gửi `title: None` cho mọi tập đang chiếu → xoá sạch tên tập.
+    """
+    row: Dict[str, Any] = {"anime_id": anime_id, "number": number}
+    iso = to_iso(airing_at)
+    if iso:
+        row["airing_at"] = iso
+    if title:
+        row["title"] = title
+    return row
