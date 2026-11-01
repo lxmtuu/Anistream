@@ -254,6 +254,23 @@ def build_anime_patch(
     return {k: v for k, v in patch.items() if v is not None}
 
 
+# TMDB trả tên placeholder khi chưa có bản dịch: "Episode 7", "Ep. 7", "Tập 7",
+# "第7話". Đo trên DB thật: 429/526 tên tập là dạng này → app hiện dòng chữ vô
+# nghĩa trùng với con số to ở trên. Thà để trống (ô chỉ hiện số tập).
+GENERIC_EP_TITLE = re.compile(
+    r"^\s*(?:episode|ep\.?|tập|tap|第)?\s*\d+\s*(?:話|话|集)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def clean_episode_title(name: Optional[str]) -> Optional[str]:
+    """Tên tập dùng được? Placeholder ("Episode 7") → None."""
+    t = (name or "").strip()
+    if not t or GENERIC_EP_TITLE.match(t):
+        return None
+    return t
+
+
 def episode_rows(
     anime_id: int,
     season: Dict[str, Any],
@@ -273,7 +290,7 @@ def episode_rows(
         out.append({
             "anime_id": anime_id,
             "number": num,
-            "title": (e.get("name") or "").strip() or None,
+            "title": clean_episode_title(e.get("name")),
             "airing_at": dt.datetime.fromisoformat(air).replace(
                 tzinfo=dt.timezone.utc).isoformat(),
         })

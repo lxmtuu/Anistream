@@ -74,11 +74,19 @@ class VnTime {
   static String dayLabel(DateTime t) =>
       '${_weekdays[t.weekday - 1]} ${t.day.toString().padLeft(2, '0')}/${t.month.toString().padLeft(2, '0')}';
 
+  /// `countdown` chỉ dành cho mốc SẮP tới. Với mốc đã qua nó trả 'đang chiếu',
+  /// nghe như tập chiếu năm 2018 vẫn đang phát → dùng `airStatus` khi chưa chắc.
   static String countdown(DateTime t) {
     final d = t.difference(DateTime.now());
-    if (d.isNegative) return 'đang chiếu';
+    if (d.isNegative) return 'đã chiếu';
     if (d.inDays >= 1) return '${d.inDays} ngày nữa';
     if (d.inHours >= 1) return '${d.inHours}h${(d.inMinutes % 60).toString().padLeft(2, '0')}p';
     return '${d.inMinutes} phút nữa';
+  }
+
+  /// Nhãn trạng thái phát sóng: 'đã chiếu' / '3 ngày nữa' / '2h05p' / '12 phút nữa'.
+  static String airStatus(DateTime t) {
+    if (!t.isAfter(DateTime.now())) return 'đã chiếu';
+    return countdown(t);
   }
 }

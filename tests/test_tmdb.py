@@ -165,8 +165,15 @@ class TestEpisodeRows(unittest.TestCase):
         self.assertEqual(tmdb.episode_rows(7, self.SEASON, single_season=False), [])
 
     def test_ten_rong_thanh_None(self):
+        # "Tập 1" là placeholder (không phải tên thật) → None, xem TestCleanEpisodeTitle
         rows = tmdb.episode_rows(7, self.SEASON, True)
-        self.assertEqual(rows[0]["title"], "Tập 1")
+        self.assertIsNone(rows[0]["title"])
+
+    def test_ten_that_duoc_giu(self):
+        season = {"episodes": [{"episode_number": 1, "name": "Cơn mưa đầu mùa",
+                                "air_date": "2023-10-01"}]}
+        self.assertEqual(tmdb.episode_rows(7, season, True)[0]["title"],
+                         "Cơn mưa đầu mùa")
 
 
 class TestRealSeasons(unittest.TestCase):
@@ -285,6 +292,39 @@ class TestEpisodesPlausible(unittest.TestCase):
 
     def test_mua_rong(self):
         self.assertTrue(tmdb.episodes_plausible(12, 0))
+
+
+class TestCleanEpisodeTitle(unittest.TestCase):
+    """TMDB trả tên placeholder khi chưa dịch → không lưu vào DB.
+
+    Đo thật trên DB: 429/526 tên tập là "Episode N" → app hiện dòng chữ vô nghĩa
+    trùng với con số to của ô tập.
+    """
+
+    def test_bo_placeholder(self):
+        for raw in ("Episode 7", "Ep. 7", "Tập 7", "第7話", "EP7", "7", "  Episode 12 "):
+            self.assertIsNone(tmdb.clean_episode_title(raw), raw)
+
+    def test_giu_ten_that(self):
+        self.assertEqual(tmdb.clean_episode_title("Nishikata và cơn mưa"),
+                         "Nishikata và cơn mưa")
+        # chứa chữ "episode" nhưng là tên thật → giữ
+        self.assertEqual(tmdb.clean_episode_title("Episode of the Town"),
+                         "Episode of the Town")
+
+    def test_rong_va_none(self):
+        self.assertIsNone(tmdb.clean_episode_title(""))
+        self.assertIsNone(tmdb.clean_episode_title(None))
+
+    def test_episode_rows_dung_ham_loc(self):
+        season = {"episodes": [
+            {"episode_number": 1, "name": "Episode 1", "air_date": "2018-01-08"},
+            {"episode_number": 2, "name": "Cuộc gặp ở phòng y tế",
+             "air_date": "2018-01-15"},
+        ]}
+        rows = tmdb.episode_rows(9, season, single_season=True)
+        self.assertIsNone(rows[0]["title"])
+        self.assertEqual(rows[1]["title"], "Cuộc gặp ở phòng y tế")
 
 
 if __name__ == "__main__":
