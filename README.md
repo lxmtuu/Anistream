@@ -40,7 +40,10 @@
 │   ├── UI_PREVIEW.html       ⭐ xem trước 3 màn hình (poster thật, offline)
 │   └── test/                 unit test watchlist (flutter test)
 ├── tools/                    gen_mock.py · gen_preview.py
-└── scripts/test_api.sh       smoke test 4 endpoint
+└── scripts/
+    ├── preflight.sh          kiểm tra .env + schema + key (anon hay service_role) trước khi ingest
+    ├── test_api.sh           smoke test 4 endpoint
+    └── setup_app.sh/.ps1     sinh thư mục platform còn thiếu
 ```
 
 ## Chạy từ đầu (theo thứ tự)
@@ -52,6 +55,7 @@
 # 2. Ingest (cần SUPABASE_URL + SUPABASE_SERVICE_KEY trong .env)
 cp .env.example .env
 pip install -r ingest/requirements.txt
+bash scripts/preflight.sh           # ← kiểm tra key/schema trước, ~5 giây
 python3 -m ingest.main all          # hoặc thêm --dry-run để test không ghi DB
 
 # 3. Backend

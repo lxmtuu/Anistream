@@ -73,6 +73,7 @@ cp .env.example .env
 #   điền SUPABASE_URL + SUPABASE_SERVICE_KEY (service_role, KHÔNG phải anon)
 
 pip install -r ingest/requirements.txt
+bash scripts/preflight.sh       # bắt sớm: nhầm anon key, chưa chạy schema.sql, URL sai
 python3 -m ingest.main all      # ~2 phút: lịch phát + catalog + video official
 
 # 3. Deploy API

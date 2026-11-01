@@ -55,6 +55,7 @@ khi repo chưa có thư mục platform — `scripts/setup_app.sh` đã tự xử
 # 2) Ingest dữ liệu
 cp .env.example .env          # điền SUPABASE_URL + SUPABASE_SERVICE_KEY (service_role)
 pip install -r ingest/requirements.txt
+bash scripts/preflight.sh     # kiểm tra key + bảng trước khi chạy (5 giây)
 python3 -m ingest.main all    # ~2 phút
 
 # 3) Deploy API

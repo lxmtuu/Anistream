@@ -161,7 +161,9 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
             print(f"    ep{str(v['episode']).rjust(3)}  {conf:.2f} {how:<10} "
                   f"{v['series'][:30]:<30} → {t[:32]}")
     else:
-        DB.upsert("streaming_links", links, on_conflict="anime_id,platform,region,episode_number")
+        DB.upsert("streaming_links", links,
+                  on_conflict="anime_id,platform,region,episode_number",
+                  fallback_per_row=True)
 
     if unmatched:
         print("  ⚠ chưa khớp (cần map tay trong bảng platform_map / alias):")
