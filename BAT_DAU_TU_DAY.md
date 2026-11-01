@@ -32,15 +32,14 @@ powershell -ExecutionPolicy Bypass -File scripts\setup_app.ps1
 **Hoặc làm tay:**
 ```bash
 cd app
-cp pubspec.yaml /tmp/pub.yaml
-flutter create --org com.anistream --project-name anistream ^
-  --platforms=android,ios,web,windows,macos,linux .
-cp /tmp/pub.yaml pubspec.yaml
 flutter pub get
 flutter run -d chrome        # nhanh nhất; hoặc -d windows / -d <mã điện thoại>
 ```
 
-**Bước `flutter create` là bắt buộc** — gói này không chứa thư mục `android/`, `windows/`… (do máy tạo code không có Flutter SDK). Lệnh đó sinh chúng ra mà **không ghi đè** code trong `lib/`.
+**Đừng chạy `flutter create`.** Gói này đã có sẵn `android/ ios/ web/ windows/ macos/
+linux/` với cấu hình chỉnh tay (quyền INTERNET, POST_NOTIFICATIONS, applicationId…).
+`flutter create .` sẽ **ghi đè** chúng và làm bản release mất mạng. (Lệnh này chỉ cần
+khi repo chưa có thư mục platform — `scripts/setup_app.sh` đã tự xử lý trường hợp đó.)
 
 **Xong khi:** Home có poster thật, bấm ▶ phát được video YouTube, tab Lịch phát có danh sách.
 
@@ -88,11 +87,12 @@ Chi tiết: `supabase/README.md` và `ingest/README.md`.
 | `anime_sources.md` | 10 nguồn API anime + cách cập nhật tập mới |
 | `VI_SAO_CHI_XEM_DUOC_MOT_SO.md` | Vì sao chỉ xem được một số bộ/tập + cách tăng lên hàng nghìn |
 | `db/schema.sql` | Postgres schema đầy đủ: 12 bảng, RLS, view, index (chạy 1 lần) |
-| `app/` | Flutter app: 19 file Dart, 4.696 dòng, chạy được bằng mock data thật |
+| `app/` | Flutter app: 20 file Dart, chạy được bằng mock data thật; watchlist lưu bền trên máy |
 | `supabase/` | 5 Edge Function: `home` `search` `schedule` `anime` `push` |
 | `ingest/` | Worker Python: AniList + RSS YouTube official → Supabase |
 | `tools/` | `gen_mock.py` (sinh dữ liệu thật) · `gen_preview.py` (sinh UI preview) |
 | `scripts/` | `setup_app.sh/.ps1` (cài đặt) · `test_api.sh` (smoke test API) |
+| `BAO_CAO_RA_SOAT.md` | Kết quả rà soát toàn repo 01/11/2026 + danh sách lỗi đã sửa |
 
 ## Dữ liệu lấy từ đâu (và vì sao hợp pháp)
 
@@ -111,7 +111,7 @@ NĐ 131/2013 hay Điều 225 BLHS). Chi tiết: `DECISION.md` §2.
 
 | Lỗi | Cách sửa |
 |---|---|
-| `Target of URI doesn't exist` | Chưa chạy `flutter create` → dùng `scripts/setup_app.sh` |
+| `Target of URI doesn't exist` | Thiếu thư mục platform → chạy `scripts/setup_app.sh` (chỉ sinh phần thiếu) |
 | `version solving failed` | `flutter pub upgrade --major-versions && flutter pub get` |
 | Player "Video unavailable" | Chủ kênh tắt nhúng sau khi ingest → `python3 -m ingest.main youtube` |
 | Ảnh không tải | Cần mạng lần đầu (`cached_network_image`) |

@@ -15,8 +15,13 @@
 | 2 | App Flutter v0.1 (4 tab + detail + player, mock data thật) | ✅ |
 | 3 | Backend Edge Functions (4 endpoint, typecheck sạch) | ✅ |
 | 4 | Push FCM "tập mới vừa ra" (backend + client + deep link) | ✅ |
-| 5 | Auth + watchlist persist (Drift + Supabase Auth) | ⏭ |
+| 5 | Watchlist persist trên máy (SharedPreferences) | ✅ |
+| 5b | Auth + đồng bộ watchlist đa thiết bị (Supabase Auth) | ⏭ |
 | 6 | Desktop build + submit store | ⏭ |
+| 7 | CI `flutter analyze` + test cho app | ✅ |
+
+> Rà soát toàn repo 01/11/2026: xem **`BAO_CAO_RA_SOAT.md`** (6 lỗi thật đã sửa,
+> 5 lỗi TypeScript/Python đã kiểm tra sạch, phần còn tồn đọng + lý do).
 
 ## Cấu trúc repo
 
@@ -30,8 +35,9 @@
 ├── db/schema.sql             Postgres schema + RLS + view (chạy 1 lần)
 ├── ingest/                   worker: AniList + YouTube official → Supabase
 ├── supabase/                 Edge Functions: home · search · schedule · anime · push
-├── app/                      Flutter app (lib/ 18 file, 4.484 dòng)
-│   └── UI_PREVIEW.html       ⭐ xem trước 3 màn hình (poster thật, offline)
+├── app/                      Flutter app (lib/ 20 file) + platform folders đã sẵn
+│   ├── UI_PREVIEW.html       ⭐ xem trước 3 màn hình (poster thật, offline)
+│   └── test/                 unit test watchlist (flutter test)
 ├── tools/                    gen_mock.py · gen_preview.py
 └── scripts/test_api.sh       smoke test 4 endpoint
 ```
@@ -52,12 +58,8 @@ npm i -g supabase && supabase login && supabase link --project-ref <ref>
 supabase functions deploy home search schedule anime
 bash scripts/test_api.sh https://<ref>.supabase.co/functions/v1
 
-# 4. App
+# 4. App  (repo ĐÃ có android/ios/web/windows/macos/linux → KHÔNG chạy flutter create)
 cd app
-cp pubspec.yaml /tmp/pub.yaml
-flutter create --org com.anistream --project-name anistream \
-  --platforms=android,ios,windows,macos,linux .
-cp /tmp/pub.yaml pubspec.yaml
 flutter pub get
 flutter run                          # dùng mock data (không cần backend)
 # hoặc nối backend thật:

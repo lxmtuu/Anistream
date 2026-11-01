@@ -2,9 +2,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # setup_app.sh — chuẩn bị project Flutter mà KHÔNG ghi đè code của bạn.
 #
-# Cách làm: sinh một project Flutter tạm ở nơi khác, rồi chỉ COPY các thư mục
-# platform (android/, ios/, windows/…) vào app/. Nhờ vậy lib/main.dart và
-# pubspec.yaml của bạn không bao giờ bị flutter create ghi đè.
+# Nguyên tắc: CHỈ sinh thư mục platform nào còn THIẾU. Repo đã có sẵn
+# android/ ios/ windows/ macos/ linux/ web/ (đã được chỉnh tay: quyền INTERNET,
+# POST_NOTIFICATIONS, tên app…). Ghi đè chúng sẽ làm mất các chỉnh sửa đó và
+# làm bản release mất mạng → script này không bao giờ copy đè.
 #
 # Dùng:  bash scripts/setup_app.sh
 # ─────────────────────────────────────────────────────────────────────────────
@@ -12,6 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 APP="$ROOT/app"
+PLATFORMS="android ios web windows macos linux"
 
 if ! command -v flutter >/dev/null 2>&1; then
   echo "❌ Chưa có Flutter trên PATH."
@@ -27,27 +29,28 @@ if [ ! -f "$APP/pubspec.yaml" ]; then
   exit 1
 fi
 
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-
-echo "▶ Sinh project Flutter tạm (sinh platform folders)…"
-flutter create --org com.anistream --project-name anistream \
-  --platforms=android,ios,web,windows,macos,linux "$TMP/gen" >/dev/null
-
-echo "▶ Copy platform folders vào app/ (không đụng tới lib/)…"
-for d in android ios windows macos linux web; do
-  if [ -d "$TMP/gen/$d" ]; then
-    rm -rf "$APP/$d"
-    cp -R "$TMP/gen/$d" "$APP/$d"
-    echo "   + $d/"
-  fi
+missing=""
+for d in $PLATFORMS; do
+  [ -d "$APP/$d" ] || missing="$missing $d"
 done
-[ -f "$TMP/gen/.metadata" ] && cp "$TMP/gen/.metadata" "$APP/.metadata"
-[ -f "$TMP/gen/.gitignore" ] && cp -n "$TMP/gen/.gitignore" "$APP/.gitignore" || true
 
-# pubspec của Flutter có thể ghi đè bản của mình → khôi phục từ git/backup nếu cần
-if ! grep -q "flutter_riverpod" "$APP/pubspec.yaml"; then
-  echo "⚠  pubspec.yaml trông không phải bản của AniStream."
+if [ -z "$missing" ]; then
+  echo "▶ Đã có đủ thư mục platform — bỏ qua bước sinh, không đụng file nào."
+else
+  echo "▶ Thiếu:$missing → sinh phần còn thiếu vào thư mục tạm…"
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+
+  flutter create --org com.anistream --project-name anistream \
+    --platforms=android,ios,web,windows,macos,linux "$TMP/gen" >/dev/null
+
+  for d in $missing; do
+    if [ -d "$TMP/gen/$d" ]; then
+      cp -R "$TMP/gen/$d" "$APP/$d"
+      echo "   + $d/"
+    fi
+  done
+  [ -f "$APP/.metadata" ] || cp "$TMP/gen/.metadata" "$APP/.metadata" 2>/dev/null || true
 fi
 
 echo "▶ flutter pub get…"
@@ -63,4 +66,7 @@ Chạy thử (chọn 1):
   cd app && flutter devices              # xem thiết bị/điện thoại có sẵn
 
 Lần chạy đầu mất 1–3 phút (tải package). Sau đó vài giây.
+
+Muốn bật thông báo "tập mới vừa ra" (tuỳ chọn):
+  dart pub global activate flutterfire_cli && flutterfire configure
 TXT

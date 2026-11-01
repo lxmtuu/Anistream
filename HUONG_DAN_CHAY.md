@@ -1,5 +1,11 @@
 # Hướng dẫn setup & chạy — AniStream
 
+> ⚠️ **Cập nhật 01/11/2026:** repo hiện **đã có sẵn** `android/ ios/ web/ windows/
+> macos/ linux/`. Bỏ qua mọi bước `flutter create` trong tài liệu này — chỉ cần
+> `cd app && flutter pub get && flutter run`. `flutter create .` sẽ ghi đè cấu hình
+> platform (quyền INTERNET, applicationId…) và làm bản release mất mạng.
+
+
 **Mục tiêu:** từ file zip → thấy app chạy trên máy bạn. Thời gian thực tế **15–25 phút** (lần đầu).
 
 ```
@@ -96,16 +102,12 @@ bash scripts/setup_app.sh
 ### Nếu script lỗi — làm tay
 ```bash
 cd app
-# 1. sinh project tạm
-flutter create --org com.anistream --project-name anistream --platforms=android,ios,windows,macos,linux ../gen_tmp
-# 2. copy các thư mục platform vào app/
-#    Windows:
-#      xcopy ..\gen_tmp\windows windows\ /E /I /Y      (và android, ios, macos, linux)
-#    macOS/Linux:
-#      cp -R ../gen_tmp/windows .   (và android, ios, macos, linux)
-# 3. cài package
-flutter pub get
+flutter pub get          # đủ rồi: thư mục platform đã có sẵn trong repo
+flutter run -d chrome
 ```
+
+Nếu vì lý do nào đó **mất** một thư mục platform, đừng `flutter create .` (ghi đè
+cấu hình). Chạy lại `bash scripts/setup_app.sh`: nó chỉ sinh đúng thư mục còn thiếu.
 
 > **Vì sao không chạy `flutter create .` ngay trong `app\`?** Vì lệnh đó có thể ghi đè `lib/main.dart` và `pubspec.yaml` — mất code. Script làm cách an toàn hơn: sinh ở thư mục tạm rồi chỉ copy phần platform.
 
@@ -179,7 +181,7 @@ flutter run -d chrome --dart-define=USE_MOCK=false ^
 | Gradle tải chậm / lỗi mạng | Bỏ qua Android, chạy `-d chrome` trước; Android build sau |
 | App mở ra **màn hình trắng** | Xem log terminal; thử `flutter clean && flutter pub get && flutter run -d chrome` |
 | Ảnh không hiện, chỉ có ô xám | Không có internet, hoặc mạng chặn `s4.anilist.co`. Video cũng cần mạng |
-| `This application is not configured to build on the web` | Thiếu thư mục `web/`. Sửa: `cd app` → `flutter create --platforms=web .` (hoặc chạy lại script setup bản mới) |
+| `This application is not configured to build on the web` | Thiếu thư mục `web/` → chạy `bash scripts/setup_app.sh` (chỉ sinh phần thiếu, không đè) |
 | `Can't have a late final field in a class with a const constructor` | Lỗi code đã sửa ở bản v0.1.1 — tải lại zip, hoặc xem mục "Sửa tay" bên dưới |
 | Lỗi liên quan `firebase_*` | App đã bọc try/catch nên vẫn chạy. Nếu vẫn chặn build: tạm xoá 3 dòng `firebase_core/firebase_messaging/shared_preferences` trong `pubspec.yaml` (mất tính năng push, không ảnh hưởng phần khác) |
 
@@ -203,8 +205,7 @@ Map<int, Anime> get byId => _byIdCache ??= {for (final a in anime) a.id: a};
 
 **2. Thêm web support** (nguyên nhân lỗi "not configured to build on the web"):
 ```powershell
-cd app
-flutter create --platforms=web .
+bash scripts/setup_app.sh      # chỉ sinh thư mục web/ còn thiếu
 ```
 
 **3. Bật Developer Mode** (cần cho plugin dùng symlink: firebase, shared_preferences):

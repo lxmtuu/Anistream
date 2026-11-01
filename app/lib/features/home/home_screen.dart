@@ -68,10 +68,10 @@ class _HomeBody extends StatelessWidget {
               title: s.title,
               items: feed.itemsOf(s),
               onTap: (a) => context.push('/anime/${a.slug}'),
-              actionLabel: i == 0 ? 'Tất cả' : null,
-              onAction: i == 0
-                  ? () => context.go('/schedule')
-                  : null,
+              // Nhãn phải khớp đích đến: nút này mở tab Lịch phát, không phải
+              // danh sách "tất cả" (tab Tìm mới là nơi duyệt toàn bộ).
+              actionLabel: i == 0 ? 'Lịch phát' : null,
+              onAction: i == 0 ? () => context.go('/schedule') : null,
             );
           },
         ),

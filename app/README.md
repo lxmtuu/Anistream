@@ -9,18 +9,12 @@
 
 ## Chạy lần đầu (5 phút)
 
-Workspace này chỉ chứa `lib/` + `pubspec.yaml` (không chứa thư mục platform do máy sinh code không có Flutter SDK). Cần sinh phần platform một lần:
+Repo đã có sẵn thư mục platform (`android/ ios/ web/ windows/ macos/ linux/`) với
+cấu hình chỉnh tay — nên **không cần và không nên chạy `flutter create`** (lệnh đó
+ghi đè manifest, làm bản release mất quyền INTERNET).
 
 ```bash
 cd app
-
-# 1. giữ lại pubspec của mình rồi sinh project
-cp pubspec.yaml /tmp/pubspec.anistream.yaml
-flutter create --org com.anistream --project-name anistream \
-  --platforms=android,ios,windows,macos,linux .
-cp /tmp/pubspec.anistream.yaml pubspec.yaml
-
-# 2. cài package & chạy
 flutter pub get
 flutter run                       # dùng dữ liệu mẫu (mặc định, không cần mạng backend)
 ```
@@ -125,8 +119,24 @@ và tạo channel id `new_episode` (v1.1). Hiện FCM dùng channel mặc địn
 
 | Lỗi | Cách sửa |
 |---|---|
-| `Target of URI doesn't exist` khi mở project | Chưa chạy `flutter create` để sinh `.dart_tool/` + platform folders → làm bước 1 |
+| `Target of URI doesn't exist` khi mở project | Chưa `flutter pub get` (thiếu `.dart_tool/`) → chạy `cd app && flutter pub get`; nếu thiếu cả thư mục platform thì chạy `bash ../scripts/setup_app.sh` |
 | `Because anistream depends on ... version solving failed` | `flutter pub upgrade --major-versions` rồi `flutter pub get` |
 | Player báo "Video unavailable" | Video bị chủ kênh tắt nhúng sau khi ingest → chạy lại `python3 -m ingest.main youtube` |
 | Ảnh không tải | Kiểm tra mạng; `cached_network_image` cần internet cho lần đầu |
 | Lỗi `FontFeature isn't defined` | Đã import `dart:ui show FontFeature` trong `schedule_screen.dart`; nếu bản Flutter cũ hơn 3.16, xoá `fontFeatures` |
+
+## Test
+
+```bash
+cd app
+flutter analyze            # bắt lỗi biên dịch + lint
+flutter test               # unit test (hiện có: watchlist lưu bền trên máy)
+```
+CI chạy 2 lệnh này tự động ở `.github/workflows/app.yml` mỗi khi sửa `app/`.
+
+## Thư viện (watchlist) lưu ở đâu
+
+`lib/data/watchlist_store.dart` — mặc định `PrefsWatchlistStore` (SharedPreferences),
+không cần đăng nhập, bền qua lần mở app, chạy cả web/desktop. Muốn đổi sang Drift
+(SQLite) hoặc đồng bộ Supabase: viết một class khác implement `WatchlistStore` rồi
+override `watchlistStoreProvider` — không phải sửa UI.

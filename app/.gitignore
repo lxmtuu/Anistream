@@ -1,0 +1,39 @@
+# Flutter/Dart — file sinh tự động, không commit
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.iml
+.idea/
+.vscode/
+*.log
+.DS_Store
+
+# Android
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+**/*.jks
+**/*.keystore
+
+# iOS/macOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+macos/Pods/
+macos/Flutter/ephemeral/
+
+# Web/desktop build tạm
+web/.dart_tool/
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+
+# Firebase config (chứa khoá riêng của từng máy/project)
+**/google-services.json
+**/GoogleService-Info.plist
+**/firebase_options.dart

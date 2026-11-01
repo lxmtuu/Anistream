@@ -14,23 +14,62 @@ class DetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final feed = ref.watch(homeFeedProvider);
+    // Ưu tiên dữ liệu đã có trong /home; nếu không có (deep link từ thông báo)
+    // thì gọi /anime?slug= — xem `animeDetailProvider`.
+    final detail = ref.watch(animeDetailProvider(slug));
+
     return Scaffold(
-      body: feed.when(
+      body: detail.when(
         loading: () => const Center(
           child: CircularProgressIndicator(color: AppTheme.accent),
         ),
         error: (e, _) => Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
-            child: Text('Lỗi: $e',
-                style: const TextStyle(color: AppTheme.muted, fontSize: 12)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Không tải được thông tin anime.\n$e',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: () =>
+                      ref.invalidate(animeDetailProvider(slug)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.text,
+                    side: const BorderSide(color: AppTheme.line),
+                  ),
+                  child: const Text('Thử lại'),
+                ),
+              ],
+            ),
           ),
         ),
-        data: (data) {
-          final anime = data.bySlug(slug);
+        data: (anime) {
           if (anime == null) {
-            return const Center(child: Text('Không tìm thấy anime này'));
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Không tìm thấy anime này',
+                      style: TextStyle(color: AppTheme.muted, fontSize: 13)),
+                  const SizedBox(height: 12),
+                  OutlinedButton(
+                    onPressed: () => context.canPop()
+                        ? context.pop()
+                        : context.go('/'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.text,
+                      side: const BorderSide(color: AppTheme.line),
+                    ),
+                    child: const Text('Quay lại'),
+                  ),
+                ],
+              ),
+            );
           }
           return _DetailBody(anime: anime);
         },

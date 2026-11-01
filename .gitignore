@@ -8,3 +8,13 @@ __pycache__/
 *.pyc
 .dart_tool/
 build/
+
+# Flutter/Dart (sinh tự động, chứa đường dẫn tuyệt đối của máy dev)
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.dart_tool/
+app/build/
+**/google-services.json
+**/GoogleService-Info.plist
+**/firebase_options.dart
+.DS_Store

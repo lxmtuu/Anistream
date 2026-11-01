@@ -4,6 +4,11 @@
 
 ---
 
+> **Cập nhật 01/11/2026 (sau rà soát):** đã sửa 6 lỗi thật trong repo — trong đó có
+> bản release Android **thiếu quyền INTERNET** (APK release sẽ không có mạng) và
+> watchlist **mất sạch mỗi lần tắt app**. Chi tiết: `BAO_CAO_RA_SOAT.md`.
+> Các bước dưới đây vẫn đúng thứ tự, chỉ bỏ bước `flutter create`.
+
 ## Trả lời trong 1 câu
 
 > **Đừng viết thêm code. Chạy thử app ngay tối nay, rồi nối backend thật trong tuần này.**
@@ -37,16 +42,11 @@ flutter --version        # cần >= 3.22
 # 1. vào thư mục app
 cd app
 
-# 2. sinh phần platform (bắt buộc, workspace không chứa)
-cp pubspec.yaml /tmp/pub.yaml
-flutter create --org com.anistream --project-name anistream \
-  --platforms=android,ios,windows,macos,linux .
-cp /tmp/pub.yaml pubspec.yaml
-
-# 3. cài package
+# 2. cài package  (repo đã có sẵn android/ios/web/windows/macos/linux → KHÔNG
+#    chạy flutter create nữa; nó sẽ ghi đè manifest đã chỉnh tay)
 flutter pub get
 
-# 4. chạy
+# 3. chạy
 flutter devices
 flutter run -d chrome     # nhanh nhất để thấy UI (30 giây)
 flutter run -d windows    # hoặc desktop
