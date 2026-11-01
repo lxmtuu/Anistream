@@ -15,10 +15,12 @@ rồi sửa luôn những cái sửa được mà không cần máy có Flutter 
 | Toàn vẹn dữ liệu mock (`app/lib/data/mock_data.dart`) | parse JSON + đối chiếu id | ✅ 52 anime, 4 shelf, 24 slot lịch; **0 id treo**; 16 bộ có video phát được; 0 id trùng |
 | Cú pháp toàn bộ Python (`ingest/`, `tools/`) | `python3 -m compileall` | ✅ sạch |
 | Import nội bộ trong `ingest/` | AST scan | ✅ không có import trỏ vào file không tồn tại |
-| Flutter analyze / test | ❌ **không chạy được trong sandbox** (không có Flutter SDK, pub.dev không truy cập được) | → đã thêm CI `.github/workflows/app.yml` để GitHub chạy hộ |
+| Flutter analyze / test | ✅ **CI xanh** (run `41299836241`, Flutter stable + Ubuntu) — lần đầu code Dart được biên dịch | ✅ 0 error; 6/6 test watchlist pass |
+| Ingest workflow (GitHub Actions) trên `main` | `gh run list --workflow=ingest.yml` | ⚠️ **0 lần chạy** — chưa từng có dữ liệu thật nào được ingest |
 
-Nói thẳng: **phần Dart vẫn chưa được biên dịch lần nào trong phiên này.** Tớ đọc và
-soát tay từng file, nhưng chỉ `flutter analyze` mới chứng minh được.
+Nói thẳng: phần Dart **giờ đã có bằng chứng biên dịch** (CI lần đầu chạy 01/11/2026):
+`flutter analyze` 0 error, `flutter test` 6/6 pass. Cái CI **không** chứng minh được là
+app chạy đúng trên máy thật (pin, quyền, mất mạng, Firebase) — việc đó vẫn cần bạn.
 
 ---
 
