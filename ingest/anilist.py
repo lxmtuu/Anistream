@@ -5,7 +5,7 @@ Miễn phí, không cần key. Giới hạn ~30–90 request/phút → có retry
 import datetime as dt
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from . import config
@@ -137,8 +137,9 @@ def search_media(title: str, per_page: int = 5) -> List[Dict]:
 # Mùa MỚI: AniList ghi quan hệ PREQUEL/SEQUEL giữa các entry. Đây là cách DUY NHẤT
 # biết "bộ này vừa có mùa 2" mà không phải thêm tay từng bộ: mỗi mùa là một entry
 # riêng, và entry mùa 1 KHÔNG tự có tập của mùa 2.
-def sequels(media_id: int) -> List[Dict]:
-    """Các entry là SEQUEL (mùa sau) của `media_id`."""
+def related(media_id: int,
+            kinds: Tuple[str, ...] = ("SEQUEL",)) -> List[Dict]:
+    """Các entry có quan hệ thuộc `kinds` (SEQUEL / PREQUEL / …) với `media_id`."""
     q = """
     query($id:Int){
       Media(id:$id, type:ANIME){
@@ -153,14 +154,29 @@ def sequels(media_id: int) -> List[Dict]:
     }""" % MEDIA_FIELDS
     data = gql(q, {"id": media_id})
     edges = (((data.get("Media") or {}).get("relations") or {}).get("edges") or [])
+    wanted = {k.upper() for k in kinds}
     out = []
     for e in edges:
-        if (e.get("relationType") or "").upper() != "SEQUEL":
+        if (e.get("relationType") or "").upper() not in wanted:
             continue
         node = e.get("node") or {}
         if node.get("id"):
             out.append(node)
     return out
+
+
+def sequels(media_id: int) -> List[Dict]:
+    """Các entry là SEQUEL (mùa sau) của `media_id`."""
+    return related(media_id, ("SEQUEL",))
+
+
+def prequels(media_id: int) -> List[Dict]:
+    """Các entry là PREQUEL (mùa TRƯỚC) của `media_id`.
+
+    Cần vì Muse đăng mùa mới nhất trước, nên DB có "Ao no Hako Season 2" mà KHÔNG
+    có mùa 1 — người dùng bấm vào bộ là thấy thiếu hẳn phần đầu.
+    """
+    return related(media_id, ("PREQUEL",))
 
 
 def is_series_like(media: Dict) -> bool:

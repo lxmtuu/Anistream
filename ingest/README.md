@@ -58,19 +58,20 @@ Quy tắc **thà thiếu còn hơn sai**:
 Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API Key (v3)**.
 ⚠️ Không dùng "Read Access Token (v4)" — code gọi bằng `api_key`.
 
-## 6 job ingest
+## 8 job ingest
 
 | Job | Lệnh | Nguồn | Chạy |
 |---|---|---|---|
 | A | `schedule` | AniList lịch phát | 30 phút |
 | B | `catalog` | AniList theo mùa | hằng đêm |
-| C | `youtube` | Muse VN (YouTube) | 6 giờ |
+| C | `youtube` | Muse VN (YouTube) → `streaming_links` | 6 giờ |
+| C' | `episodes` | **link official → `episodes`** | 6 giờ + hằng ngày |
 | D | `tmdb` | TMDB: tiếng Việt + tập | hằng ngày |
 | D' | `tmdb --refresh` | TMDB: **tập MỚI** của bộ đang chiếu | hằng ngày |
-| E | `seasons` | AniList `relations` → **mùa mới** | hằng ngày |
+| E | `seasons` | AniList `relations` → **mùa thiếu** (SEQUEL + PREQUEL) | hằng ngày |
 | F | `jikan` | Jikan/MAL → lấp tập còn thiếu | hằng ngày |
 
-`all` = A + B + C + D + D' + E + F.
+`all` = A + B + C + C' + D + D' + E + F.
 
 ### Vì sao cần D' và E (2 lỗi cũ)
 
@@ -79,6 +80,14 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
   quét mọi bộ `status=RELEASING` và `upsert` tập mới (in `+ K tập MỚI`).
 - **E** — AniList tách mỗi mùa thành entry riêng, entry mùa 1 không có tập của mùa 2.
   Job E đi theo quan hệ `SEQUEL` để thêm mùa mới (`+ mùa mới: … ← bộ gốc`).
+- **C'** — trước đây `episodes` CHỈ đến từ TMDB. Đo 01/11/2026: **23/27** bộ có
+  `streaming_links` nhưng bảng tập TRỐNG (`dandadan` 12 link/0 tập, `noblesse`
+  13/0) → trang chi tiết hiện "0 tập" dù có video. C' tạo tập từ chính link
+  `episode_number > 0`, **không** tạo tập vượt `episodes_total` (phần vượt được in
+  ra cảnh báo vì nghi link thuộc mùa khác), và không ghi đè tập đã có từ TMDB/Jikan.
+- **E** (chiều ngược) — Muse đăng mùa mới TRƯỚC, nên DB có "Ao no Hako Season 2"
+  mà thiếu hẳn mùa 1 (đo 01/11: 9/10 bộ có tên mùa đều thiếu mùa gốc). Bộ nào tên
+  có `Season N`/`Nnd Season`/`Mùa N`/`Part N` sẽ được đi thêm quan hệ `PREQUEL`.
 - **F** — AniList chỉ có tổng số tập, TMDB hay thiếu bản dịch. Jikan miễn phí, không
   cần key, tra theo `mal_id` (bảng `anime` đã lưu từ `idMal`) → lấp `title` + `aired`.
   Bỏ tập `filler` và tập vượt `episodes_total`.

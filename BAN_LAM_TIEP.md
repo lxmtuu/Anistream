@@ -202,6 +202,32 @@ select a.title_romaji, count(e.number) from anime a
 > Muốn job D chạy tự động hằng ngày: thêm `TMDB_API_KEY` vào GitHub secrets
 > (Settings → Secrets → Actions). Không có key thì job D tự bỏ qua kèm cảnh báo.
 
+### Vá 01/11/2026 — bộ có video nhưng 0 tập, và bộ thiếu mùa 1
+
+Rà soát toàn bộ 126 bộ thấy 2 lỗ hổng thật (số liệu chi tiết: `ingest/README.md` § 8 job ingest):
+
+- **23/27 bộ có link nhưng bảng `episodes` trống** (`dandadan` 12 link/0 tập,
+  `noblesse` 13/0) vì tập chỉ đến từ TMDB. Nay có **Job C'** — tạo tập từ chính
+  link official, không vượt `episodes_total`.
+- **9/10 bộ tên "Season 2/3" thiếu hẳn mùa 1** (`ao-no-hako-season-2`,
+  `black-clover-2nd-season`, …) vì Job E chỉ đi `SEQUEL`. Nay đi thêm `PREQUEL`.
+
+Chạy một lần để vá dữ liệu đang có (1 dòng):
+
+```bash
+python3 -m ingest.main episodes && python3 -m ingest.main seasons --limit-seasons 200
+```
+
+Kỳ vọng: `✓ <n> bộ · <m> tập tạo từ link`, rồi `+ mùa TRƯỚC: …`. Sau đó kiểm:
+
+```sql
+-- không còn bộ nào có link mà 0 tập (phải trả về 0 dòng)
+select a.slug, count(l.*) from anime a
+  join streaming_links l on l.anime_id = a.id and l.kind = 'free_legal'
+  where not exists (select 1 from episodes e where e.anime_id = a.id)
+  group by 1;
+```
+
 ## Bước 3d — Nhiều tập hơn cho mỗi bộ (YouTube Data API, 5 phút)
 
 Hiện 4/5 bộ "miễn phí" chỉ có **1 tập** (bộ kia có 6). Nguyên nhân: RSS chỉ trả

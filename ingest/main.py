@@ -18,6 +18,7 @@ Ví dụ test không cần Supabase:
 """
 import argparse
 import datetime as dt
+import re
 import sys
 import time
 
@@ -257,6 +258,10 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
         for name, cnt in sorted(all_review.items(), key=lambda x: -x[1])[:15]:
             print(f"      - {name}  ({cnt} video)")
 
+    # Link đã ghi xong → biến chúng thành tập hiển thị được (bộ 0 tập vì không
+    # khớp TMDB sẽ có danh sách tập thật).
+    total_links += job_link_episodes(DB)
+
     ok = not failures
     DB.log_ingest("youtube", "links", ok, total_links,
                   error="; ".join(failures)[:500])
@@ -271,6 +276,79 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
         raise RuntimeError(f"{len(failures)}/{len(channels)} kênh không lấy được video: "
                            + "; ".join(failures)[:300])
     return total_links
+
+
+# ─────────────────────────────────────────────── Job C'
+def job_link_episodes(DB, limit: int = 20000):
+    """Tạo dòng `episodes` từ chính các link official đã có.
+
+    Vì sao cần: trước đây danh sách tập CHỈ đến từ TMDB (job D). Bộ không khớp
+    TMDB (hoặc thiếu TMDB_API_KEY) thì có link mà bảng tập TRỐNG → trang chi tiết
+    hiện "0 tập" trong khi vẫn có 12 video. Đo 2026-11-01: 23/27 bộ có link đều
+    rơi vào cảnh này (`dandadan` 12 link/0 tập, `noblesse` 13/0, `bang-dream-*` 13/0).
+
+    Nguyên tắc:
+      · chỉ tạo tập cho số tập CÓ video official thật (khớp yêu cầu "số tập hiển
+        thị phải khớp nội dung video");
+      · KHÔNG tạo tập vượt `episodes_total` — chốt chặn "không link nào vượt tổng
+        số tập của bộ"; phần vượt được đếm và in ra để người vận hành xử lý;
+      · không ghi đè tập đã có (title/airing_at của TMDB/Jikan giữ nguyên).
+    """
+    print("\n▶ Job C' — tạo tập từ link official (bộ có video nhưng 0 tập)")
+    if DB.dry:
+        print("  [dry-run] cần Supabase để đọc link → bỏ qua")
+        return 0
+
+    links = DB.select(
+        "streaming_links",
+        "select=anime_id,episode_number&kind=eq.free_legal"
+        f"&episode_number=gt.0&limit={int(limit)}",
+    )
+    if not links:
+        print("  · không có link nào có số tập")
+        return 0
+
+    totals = {r["id"]: r.get("episodes_total")
+              for r in DB.select("anime", "select=id,episodes_total&limit=5000")}
+    slugs = {r["id"]: r.get("slug")
+             for r in DB.select("anime", "select=id,slug&limit=5000")}
+    existing = {r["anime_id"] for r in
+                DB.select("episodes", f"select=anime_id&limit={int(limit)}")}
+
+    by_anime = {}
+    for l in links:
+        if l.get("anime_id") and l.get("episode_number"):
+            by_anime.setdefault(l["anime_id"], set()).add(int(l["episode_number"]))
+
+    rows, overflow = [], []
+    for aid, numbers in by_anime.items():
+        if aid in existing:
+            continue                      # đã có danh sách tập → không đụng
+        total = totals.get(aid)
+        keep = sorted(numbers)
+        if isinstance(total, int) and total > 0:
+            keep = [n for n in sorted(numbers) if n <= total]
+            over = [n for n in sorted(numbers) if n > total]
+            if over:
+                overflow.append((slugs.get(aid) or aid, total, len(over)))
+        if not keep:
+            continue
+        for n in keep:
+            rows.append({"anime_id": aid, "number": n, "title": None,
+                         "airing_at": None})
+
+    if rows:
+        DB.upsert("episodes", rows, on_conflict="anime_id,number")
+    filled = len({r["anime_id"] for r in rows})
+
+    if overflow:
+        print(f"  ⚠ {len(overflow)} bộ có link VƯỢT tập tối đa → không tạo tập:")
+        for slug, total, cnt in sorted(overflow, key=lambda x: -x[2])[:10]:
+            print(f"      - {slug}: {cnt} link > {total} tập (nghi link thuộc mùa khác)")
+
+    DB.log_ingest("links", "episodes", True, len(rows))
+    print(f"  ✓ {filled} bộ · {len(rows)} tập tạo từ link")
+    return len(rows)
 
 
 # ─────────────────────────────────────────────── Job D
@@ -427,14 +505,31 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
 
 
 # ─────────────────────────────────────────────── Job E
+_LATER_SEASON = re.compile(
+    r"(season\s*\d|\d(st|nd|rd|th)\s*season|final season|part\s*\d|"
+    r"m[ùu]a\s*\d|cour\s*\d)",
+    re.IGNORECASE,
+)
+
+
+def looks_later_season(row) -> bool:
+    """Tên bộ cho thấy đây là mùa 2/3/4… (hoặc cour/part sau)."""
+    text = " ".join(str(row.get(k) or "") for k in ("slug", "title_romaji"))
+    return bool(_LATER_SEASON.search(text))
+
+
 def job_seasons(DB, limit: int = 80):
-    """Phát hiện MÙA MỚI qua quan hệ SEQUEL của AniList.
+    """Phát hiện mùa bị THIẾU qua quan hệ SEQUEL / PREQUEL của AniList.
 
     AniList tách mỗi mùa thành 1 entry riêng, nên "bộ X có mùa 2" không tự xuất
     hiện trong DB: phải đi theo quan hệ SEQUEL. Trước đây không làm → app chỉ có
     mùa mà job catalog/schedule tình cờ gặp.
+
+    Chiều ngược lại cũng hỏng: Muse đăng mùa mới trước, nên DB có
+    "Ao no Hako Season 2" mà KHÔNG có mùa 1 (đo 2026-11-01: 9/10 bộ có tên mùa
+    đều thiếu mùa gốc). Vì vậy bộ nào trông như mùa sau thì đi thêm PREQUEL.
     """
-    print("\n▶ Job E — AniList relations: tìm mùa mới (SEQUEL)")
+    print("\n▶ Job E — AniList relations: tìm mùa thiếu (SEQUEL + PREQUEL)")
     rows = DB.select(
         "anime",
         "select=id, slug, title_romaji, anilist_id, status&anilist_id=not.is.null"
@@ -444,7 +539,11 @@ def job_seasons(DB, limit: int = 80):
     if not rows:
         return 0
 
-    known = {r["anilist_id"] for r in rows if r.get("anilist_id")}
+    # `known` phải là TOÀN BỘ bảng, không chỉ trang này: nếu chỉ lấy id trong
+    # trang thì mùa đã có sẵn (nằm ngoài top `limit`) bị báo nhầm là "mùa mới".
+    all_rows = DB.select("anime", "select=anilist_id&anilist_id=not.is.null&limit=5000")
+    known = {r["anilist_id"] for r in all_rows if r.get("anilist_id")}
+    known |= {r["anilist_id"] for r in rows if r.get("anilist_id")}
     added, seen, failures = [], set(), 0
     for i, row in enumerate(rows, 1):
         try:
@@ -453,6 +552,24 @@ def job_seasons(DB, limit: int = 80):
             print(f"  ! {row.get('slug')}: {type(e).__name__}: {str(e)[:120]}")
             failures += 1
             continue
+        if looks_later_season(row):
+            try:
+                pres = anilist.prequels(row["anilist_id"])
+            except Exception as e:
+                print(f"  ! {row.get('slug')} (prequel): {type(e).__name__}: {str(e)[:120]}")
+                failures += 1
+                pres = []
+            for m in pres:
+                aid = m.get("id")
+                if not aid or aid in known or aid in seen:
+                    continue
+                if not anilist.is_series_like(m):
+                    continue
+                seen.add(aid)
+                added.append(m)
+                t = (m.get("title") or {}).get("romaji") or aid
+                print(f"  + mùa TRƯỚC: {t}  (anilist {aid}, {m.get('episodes') or '?'} tập, "
+                      f"{m.get('seasonYear') or '?'}) → {row.get('title_romaji')}")
         for m in sups:
             aid = m.get("id")
             if not aid or aid in known or aid in seen:
@@ -533,7 +650,7 @@ def job_jikan(DB, limit: int = 40, only_airing: bool = False):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="AniStream ingest worker")
     ap.add_argument("command", choices=["schedule", "catalog", "youtube", "tmdb",
-                                        "seasons", "jikan", "all"])
+                                        "seasons", "jikan", "episodes", "all"])
     ap.add_argument("--hours", type=int, default=26)
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--limit", type=int, default=25, help="số video mỗi kênh")
@@ -590,6 +707,8 @@ def main(argv=None):
             total += job_seasons(DB, args.limit_seasons)
         if args.command == "jikan":
             total += job_jikan(DB, args.limit_jikan, args.only_airing)
+        if args.command == "episodes":
+            total += job_link_episodes(DB)
         if args.command == "all":
             # Job D cần key; job E/F thì không → thiếu key TMDB KHÔNG được chặn E/F.
             if tmdb.is_configured():
@@ -602,6 +721,7 @@ def main(argv=None):
                 DB.log_ingest("tmdb", "enrich", False, 0, "thiếu TMDB_API_KEY")
             total += job_seasons(DB, args.limit_seasons)
             total += job_jikan(DB, args.limit_jikan)
+            total += job_link_episodes(DB)
     except KeyboardInterrupt:
         print("\n… dừng theo yêu cầu")
         return 130

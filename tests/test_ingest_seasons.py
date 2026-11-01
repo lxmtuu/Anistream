@@ -121,3 +121,85 @@ class TestJobSeasons(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLooksLaterSeason(unittest.TestCase):
+    def test_nhan_dien_mua_sau(self):
+        for t in ("Ao no Hako Season 2", "Kusuriya no Hitorigoto 3rd Season",
+                  "Black Clover 2nd Season", "One Punch Man Part 2",
+                  "Some Anime - Mùa 2"):
+            self.assertTrue(ingest_main.looks_later_season({"title_romaji": t}), t)
+
+    def test_bo_mua_dau_khong_bi_coi_la_mua_sau(self):
+        for t in ("Fairy Tail", "Hunter x Hunter", "Dandadan", "Ao no Hako"):
+            self.assertFalse(ingest_main.looks_later_season({"title_romaji": t}), t)
+
+
+class TestJobSeasonsPrequel(unittest.TestCase):
+    """Muse đăng mùa mới trước → DB có mùa 2 mà thiếu mùa 1."""
+
+    def _run(self, db, sequels_map, prequels_map, rows=None):
+        def pick(mp):
+            def f(aid):
+                v = mp.get(aid, [])
+                if isinstance(v, Exception):
+                    raise v
+                return v
+            return f
+
+        with patch.object(anilist, "sequels", side_effect=pick(sequels_map)), \
+                patch.object(anilist, "prequels", side_effect=pick(prequels_map)):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                n = ingest_main.job_seasons(db, limit=10)
+        return n, buf.getvalue()
+
+    def test_them_mua_truoc_cho_bo_la_mua_2(self):
+        row = dict(ROW, id=2, slug="ao-no-hako-season-2",
+                   title_romaji="Ao no Hako Season 2", anilist_id=999)
+        db = FakeDB([row])
+        n, out = self._run(db, {}, {999: [m(100, "Ao no Hako", episodes=25)]})
+        self.assertEqual(n, 1)
+        anime_rows = [r for u in db.upserted if u[0] == "anime" for r in u[1]]
+        self.assertEqual(anime_rows[0]["title_romaji"], "Ao no Hako")
+        self.assertIn("mùa TRƯỚC", out)
+
+    def test_khong_hoi_prequel_cho_mua_dau(self):
+        db = FakeDB([dict(ROW)])
+        called = []
+
+        with patch.object(anilist, "sequels", return_value=[]), \
+                patch.object(anilist, "prequels",
+                             side_effect=lambda aid: called.append(aid) or []):
+            with redirect_stdout(io.StringIO()):
+                ingest_main.job_seasons(db, limit=10)
+        self.assertEqual(called, [])
+
+    def test_prequel_da_co_trong_db_thi_khong_them(self):
+        row = dict(ROW, id=2, slug="x-season-2", title_romaji="X Season 2",
+                   anilist_id=999)
+        other = dict(ROW, id=3, slug="x", title_romaji="X", anilist_id=100)
+        db = FakeDB([row, other])
+        n, _ = self._run(db, {}, {999: [m(100, "X")]})
+        self.assertEqual(n, 0)
+
+
+class TestRelated(unittest.TestCase):
+    def test_related_loc_dung_loai(self):
+        # gql() đã mở gói payload["data"] → patch trả thẳng "Media".
+        payload = {"Media": {"relations": {"edges": [
+            {"relationType": "PREQUEL", "node": {"id": 1}},
+            {"relationType": "SEQUEL", "node": {"id": 2}},
+            {"relationType": "SIDE_STORY", "node": {"id": 3}},
+        ]}}}
+        with patch.object(anilist, "gql", return_value=payload, create=True):
+            self.assertEqual([n["id"] for n in anilist.related(9, ("PREQUEL",))], [1])
+            self.assertEqual([n["id"] for n in anilist.related(9, ("PREQUEL", "SEQUEL"))],
+                             [1, 2])
+
+    def test_sequels_va_prequels_dung_related(self):
+        with patch.object(anilist, "related", return_value=[{"id": 7}]) as r:
+            self.assertEqual(anilist.sequels(5), [{"id": 7}])
+            anilist.prequels(5)
+        self.assertEqual([c.args for c in r.call_args_list],
+                         [(5, ("SEQUEL",)), (5, ("PREQUEL",))])
