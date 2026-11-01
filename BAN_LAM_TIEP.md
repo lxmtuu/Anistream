@@ -234,7 +234,25 @@ python3 -m ingest.main youtube --deep --limit 200
 ```
 
 **Kỳ vọng:** log ghi `BACKFILL toàn bộ kênh (YouTube API)` thay vì `RSS`, và số link
-tăng lên nhiều. Kiểm:
+tăng lên nhiều.
+
+**Bản mới ghi DB ngay sau MỖI kênh** và lưu cache ghép tên vào
+`.cache/match_cache.json` — nên:
+
+- dừng giữa chừng (Ctrl+C, mất mạng) **không mất** link đã ghép của kênh trước
+- chạy lại thì **bỏ qua** tên đã biết, chỉ ghép phần còn thiếu
+- mỗi kênh in `✓ đã ghi N link … (kênh Muse Việt Nam)` / `· đã lưu cache N tên`
+- nếu một kênh lỗi, cuối job **báo lỗi và thoát khác 0** (các kênh khác vẫn đã ghi)
+
+Lần đầu chạy có thể mất **10–30 phút** (AniList giới hạn tốc độ). Xem tiến độ ở
+dòng `… ghép tên 50/480`. Muốn chạy từng kênh:
+
+```bash
+python3 -m ingest.main youtube --deep --limit 200 --channel muse_vn
+python3 -m ingest.main youtube --deep --limit 200 --channel ani_one_asia
+```
+
+Kiểm:
 
 ```sql
 select count(distinct anime_id) from streaming_links where kind='free_legal' and is_verified;
@@ -249,6 +267,15 @@ select count(*) from streaming_links where kind='free_legal' and is_verified;
 | `accessNotConfigured` | **quên bấm Enable** ở bước 3 | Library → YouTube Data API v3 → Enable, đợi 1 phút (key cũ vẫn dùng) |
 | `quotaExceeded` | hết 10.000 unit hôm nay | chờ reset 00:00 giờ Thái Bình Dương |
 | `ipRefererBlocked` | key bị giới hạn IP | Credentials → key → Application restrictions → **None** |
+
+**Lỗi/phàn nàn hay gặp khi backfill:**
+
+| Triệu chứng | Nghĩa | Sửa |
+|---|---|---|
+| `… AniList rate limit, đợi 38s` lặp nhiều | AniList đang bóp tốc độ | bình thường, cứ để chạy; muốn chậm hơn: `ANILIST_MIN_INTERVAL=3` |
+| `khớp được 0/5560 video` | tên series (thường tiếng Trung) chưa có alias | thêm vào `ingest/aliases.json` rồi chạy lại (nhanh, nhờ cache) |
+| Chạy lại thấy nhanh bất thường | đang dùng cache | muốn ghép lại từ đầu: `--no-cache` |
+| `2/2 kênh không lấy được video` | mạng/key/quota | đọc dòng lỗi phía trên; `bash scripts/check_keys.sh` |
 
 > Không bắt buộc phải có key: bỏ `--deep` thì chỉ dùng RSS như cũ.
 

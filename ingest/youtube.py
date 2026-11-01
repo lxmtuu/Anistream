@@ -146,6 +146,73 @@ def is_embeddable(video_id: str) -> bool:
         return False
 
 
+def collect_channel(
+    ch: Dict,
+    limit_per_channel: int = 25,
+    check_embed: bool = True,
+    verbose: bool = True,
+    deep: bool = False,
+    max_per_channel: int = 5000,
+) -> List[Dict]:
+    """Video của MỘT kênh. Ném lỗi nếu không lấy được (để job ghi nhận kênh hỏng).
+
+    Tách riêng khỏi `collect()` để job có thể GHI DB từng kênh một: chạy 2 kênh
+    × 5.000 video mà chỉ ghi ở cuối thì mất mạng ở kênh thứ 2 là mất cả kênh 1.
+    """
+    use_api = deep and youtube_api.has_key()
+    details = {}
+    if use_api:
+        pl = youtube_api.uploads_playlist_id(ch["channel_id"])
+        if not pl:
+            raise RuntimeError(f"không tìm thấy uploads playlist: {ch['name']}")
+        entries = youtube_api.list_videos(pl, max_videos=max_per_channel)
+        # kiểm tra nhúng + thời lượng theo lô 50 (rẻ hơn oEmbed rất nhiều)
+        details = youtube_api.video_details([e["video_id"] for e in entries])
+    else:
+        entries = fetch_rss(ch["channel_id"], limit=limit_per_channel)
+
+    if verbose:
+        mode = f"API (tối đa {max_per_channel})" if use_api else "RSS"
+        print(f"  · {ch['name']} [{mode}]: {len(entries)} video")
+
+    out: List[Dict] = []
+    for e in entries:
+        parsed = parse_title(e["title"])
+        if not parsed or parsed["episode"] <= 0:
+            continue
+
+        if use_api:
+            d = details.get(e["video_id"]) or {}
+            if d and not d.get("embeddable", True):
+                if verbose:
+                    print(f"    ✗ tắt nhúng: {e['title'][:60]}")
+                continue
+            # bỏ shorts / clip ngắn: tập anime thật thường >= 4 phút
+            dur = d.get("duration", 0)
+            if dur and dur < 240:
+                continue
+            e["duration"] = dur
+        elif check_embed and not is_embeddable(e["video_id"]):
+            if verbose:
+                print(f"    ✗ tắt nhúng: {e['title'][:60]}")
+            continue
+        parsed.update({
+            "channel": ch["key"],
+            "channel_name": ch["name"],
+            "region": ch["region"],
+            "video_id": e["video_id"],
+            "url": e["url"],
+            "raw_title": e["title"],
+            "published": e["published"],
+            "views": e.get("views", 0),
+            "duration": e.get("duration"),
+        })
+        out.append(parsed)
+        if verbose:
+            print(f"    ✓ ep{str(parsed['episode']).rjust(3)} · {parsed['series'][:52]}")
+    return out
+
+
 def collect(limit_per_channel: int = 25, check_embed: bool = True,
             verbose: bool = True, deep: bool = False,
             max_per_channel: int = 5000) -> List[Dict]:
@@ -156,68 +223,16 @@ def collect(limit_per_channel: int = 25, check_embed: bool = True,
     deep=True  → YouTube Data API: lấy TOÀN BỘ lịch sử kênh (cần YOUTUBE_API_KEY).
                  Dùng cho lần backfill đầu tiên — đây là cách có hàng nghìn tập.
     """
-    result = []
-    failures = []
-    use_api = deep and youtube_api.has_key()
-    if deep and not use_api:
+    if deep and not youtube_api.has_key():
         print("  ⚠ deep=True nhưng thiếu YOUTUBE_API_KEY → quay về RSS (chỉ 15 video/kênh)")
-
+    result, failures = [], []
     for ch in CHANNELS:
-        details = {}
         try:
-            if use_api:
-                pl = youtube_api.uploads_playlist_id(ch["channel_id"])
-                if not pl:
-                    print(f"  ! không tìm thấy uploads playlist: {ch['name']}")
-                    continue
-                entries = youtube_api.list_videos(pl, max_videos=max_per_channel)
-                # kiểm tra nhúng + thời lượng theo lô 50 (rẻ hơn oEmbed rất nhiều)
-                details = youtube_api.video_details([e["video_id"] for e in entries])
-            else:
-                entries = fetch_rss(ch["channel_id"], limit=limit_per_channel)
+            result.extend(collect_channel(ch, limit_per_channel, check_embed,
+                                          verbose, deep, max_per_channel))
         except Exception as e:
             print(f"  ! lỗi lấy video {ch['name']}: {e}")
             failures.append(ch["name"])
-            continue
-
-        if verbose:
-            mode = f"API (tối đa {max_per_channel})" if use_api else "RSS"
-            print(f"  · {ch['name']} [{mode}]: {len(entries)} video")
-
-        for e in entries:
-            parsed = parse_title(e["title"])
-            if not parsed or parsed["episode"] <= 0:
-                continue
-
-            if use_api:
-                d = details.get(e["video_id"]) or {}
-                if d and not d.get("embeddable", True):
-                    if verbose:
-                        print(f"    ✗ tắt nhúng: {e['title'][:60]}")
-                    continue
-                # bỏ shorts / clip ngắn: tập anime thật thường >= 4 phút
-                dur = d.get("duration", 0)
-                if dur and dur < 240:
-                    continue
-                e["duration"] = dur
-            elif check_embed and not is_embeddable(e["video_id"]):
-                if verbose:
-                    print(f"    ✗ tắt nhúng: {e['title'][:60]}")
-                continue
-            parsed.update({
-                "channel": ch["key"],
-                "channel_name": ch["name"],
-                "region": ch["region"],
-                "video_id": e["video_id"],
-                "url": e["url"],
-                "raw_title": e["title"],
-                "published": e["published"],
-                "views": e.get("views", 0),
-                "duration": e.get("duration"),
-            })
-            result.append(parsed)
-            if verbose:
-                print(f"    ✓ ep{str(parsed['episode']).rjust(3)} · {parsed['series'][:52]}")
     if failures:
         raise RuntimeError("Không lấy được RSS/API: " + ", ".join(failures))
     return result

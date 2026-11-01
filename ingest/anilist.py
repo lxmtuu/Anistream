@@ -3,6 +3,7 @@ anilist.py — AniList GraphQL: lịch phát, catalog theo mùa, search.
 Miễn phí, không cần key. Giới hạn ~30–90 request/phút → có retry khi 429.
 """
 import datetime as dt
+import os
 import time
 from typing import Any, Dict, List, Optional
 import requests
@@ -10,6 +11,33 @@ import requests
 from . import config
 
 ENDPOINT = "https://graphql.anilist.co"
+
+# ── Chống rate limit ────────────────────────────────────────────────────────
+# AniList cho ~90 request/phút, nhưng khi hệ thống của họ tải cao thì hạ xuống
+# ~30/phút và trả 429 kèm Retry-After. Backfill YouTube có thể cần hàng trăm
+# request → không tự giãn nhịp thì cứ 40 giây lại bị chặn một lần và chạy mãi
+# không xong.
+#   MIN_INTERVAL: giãn cách tối thiểu giữa 2 request (giây), tăng dần khi bị 429.
+#   Chỉnh bằng biến môi trường ANILIST_MIN_INTERVAL nếu cần chạy nhanh/chậm hơn.
+MIN_INTERVAL = float(os.environ.get("ANILIST_MIN_INTERVAL", "1.0"))
+MAX_INTERVAL = 6.0
+_last_call = 0.0
+
+
+def _throttle() -> None:
+    """Chờ cho đủ MIN_INTERVAL kể từ request trước (không chờ nếu đã đủ lâu)."""
+    global _last_call
+    wait = _last_call + MIN_INTERVAL - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+    _last_call = time.monotonic()
+
+
+def _slow_down(retry_after: Optional[str] = None) -> None:
+    """Bị 429 → giãn nhịp cho các request sau (không chỉ ngủ rồi thử lại y như cũ)."""
+    global MIN_INTERVAL
+    MIN_INTERVAL = min(round(MIN_INTERVAL * 1.5, 2), MAX_INTERVAL)
+    del retry_after                     # Retry-After được ngủ riêng trong gql()
 
 MEDIA_FIELDS = """
   id idMal
@@ -30,6 +58,7 @@ MEDIA_FIELDS = """
 
 def gql(query: str, variables: Optional[Dict] = None, retries: int = 4) -> Dict:
     for attempt in range(retries):
+        _throttle()
         r = requests.post(
             ENDPOINT,
             json={"query": query, "variables": variables or {}},
@@ -37,8 +66,14 @@ def gql(query: str, variables: Optional[Dict] = None, retries: int = 4) -> Dict:
             timeout=config.HTTP_TIMEOUT,
         )
         if r.status_code == 429:
-            wait = int(r.headers.get("Retry-After", 15))
-            print(f"  … AniList rate limit, đợi {wait}s")
+            raw = r.headers.get("Retry-After", "15")
+            try:
+                wait = int(float(raw))
+            except (TypeError, ValueError):
+                wait = 15
+            _slow_down(raw)
+            print(f"  … AniList rate limit, đợi {wait}s "
+                  f"(giãn nhịp lên {MIN_INTERVAL}s/request)")
             time.sleep(wait)
             continue
         if r.status_code >= 500:

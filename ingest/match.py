@@ -114,6 +114,68 @@ def alias_key(name: str) -> str:
     return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", name or "").casefold()).strip()
 
 
+# ─────────────────────────────────────────── cache ra ĐĨA
+# Vì sao: mỗi tên chưa khớp tốn tới 4 request AniList (nguyên tên → phản thể →
+# 3 từ cuối → 2 từ cuối). Backfill 5.000 video có thể cần hàng trăm tên; mất
+# mạng/Ctrl+C là mất sạch kết quả vì cache cũ chỉ nằm trong RAM. Lưu xuống đĩa
+# để lần sau chạy tiếp thay vì search lại từ đầu.
+CACHE_VERSION = 1
+
+
+def default_cache_path() -> str:
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root, ".cache", "match_cache.json")
+
+
+def _aliases_mtime() -> float:
+    try:
+        return os.path.getmtime(ALIAS_PATH)
+    except OSError:
+        return 0.0
+
+
+def load_disk_cache(path: Optional[str] = None) -> Dict[str, Optional[Dict]]:
+    """Đọc cache ghép tên. File hỏng/không có → cache rỗng (không bao giờ nổ).
+
+    Nếu `aliases.json` đã bị sửa sau lần lưu cache thì BỎ các mục âm (None):
+    người biên tập vừa thêm alias thì phải được thử lại, không kẹt vì
+    "đã từng không khớp".
+    """
+    p = path or default_cache_path()
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    entries = data.get("entries") or {}
+    out: Dict[str, Optional[Dict]] = {}
+    aliases_changed = data.get("aliases_mtime") != _aliases_mtime()
+    for k, v in entries.items():
+        if v is None:
+            if aliases_changed:
+                continue                  # có alias mới → thử lại
+            out[k] = None
+        elif isinstance(v, dict):
+            out[k] = v
+    return out
+
+
+def save_disk_cache(cache: Dict[str, Optional[Dict]], path: Optional[str] = None) -> str:
+    """Ghi cache nguyên tử (tmp + rename): Ctrl+C giữa lúc ghi không làm hỏng file."""
+    p = path or default_cache_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    payload = {
+        "version": CACHE_VERSION,
+        "aliases_mtime": _aliases_mtime(),
+        "entries": {k: v for k, v in cache.items()},
+    }
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+    os.replace(tmp, p)
+    return p
+
+
 def load_aliases() -> Dict[str, int]:
     try:
         with open(ALIAS_PATH, encoding="utf-8") as f:
