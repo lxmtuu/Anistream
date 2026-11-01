@@ -52,6 +52,9 @@
 
 ## Chạy từ đầu (theo thứ tự)
 
+> 👉 **Nếu backend đã dựng xong và bạn chỉ cần nạp dữ liệu + chạy app:**
+> đọc [`BAN_LAM_TIEP.md`](BAN_LAM_TIEP.md) — 6 bước, ~25 phút, có cả cách kiểm chứng.
+
 ```bash
 # ✅ BƯỚC 1 + 3 ĐÃ LÀM SẴN trên project thật:
 #    https://snpzrblwiamqtrnifdis.supabase.co  (Singapore, free)

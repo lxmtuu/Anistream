@@ -73,6 +73,8 @@ flutter run -d windows    # hoặc desktop
 #    · .env đã điền sẵn SUPABASE_URL + SUPABASE_SERVICE_KEY  (file bị gitignore)
 #    Bằng chứng chi tiết: supabase/README.md §0
 
+> 📖 Từng bước bấm-copy chạy được: **`BAN_LAM_TIEP.md`**
+
 # 2. Cấu hình ingest — CHỈ CÒN VIỆC NÀY (phải chạy trên máy bạn: cần AniList/YouTube)
 pip install -r ingest/requirements.txt
 bash scripts/preflight.sh       # bắt sớm: nhầm anon key, chưa chạy schema.sql, URL sai
