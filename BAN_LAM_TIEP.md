@@ -434,9 +434,36 @@ Kiểm bằng lệnh có sẵn:
 bash scripts/check_cron.sh          # exit 0 = cron chạy thật · exit 1 = cron chết
 ```
 
-Nếu `exit 1` sau vài giờ: dùng cron ngoài (cron-job.org) gọi
-`POST /repos/<owner>/<repo>/actions/workflows/ingest.yml/dispatches` với body
-`{"ref":"main"}` — script in sẵn câu lệnh mẫu.
+Nếu `exit 1` sau vài giờ: dùng **cron bên ngoài** gọi vào. Đã có script sẵn:
+
+```bash
+# 1. Tạo PAT: github.com/settings/tokens → Fine-grained
+#    Repository access: chỉ lxmtuu/Anistream
+#    Permissions → Actions: Read and write     (không cần quyền nào khác)
+export GH_TOKEN=github_pat_xxx
+
+# 2. Kích hoạt thử
+bash scripts/trigger_ingest.sh lxmtuu/Anistream all
+```
+
+**Cách A — cron-job.org (miễn phí, 5 phút):**
+
+| Trường | Giá trị |
+|---|---|
+| URL | `https://api.github.com/repos/lxmtuu/Anistream/actions/workflows/ingest.yml/dispatches` |
+| Method | **POST** |
+| Header | `Authorization: Bearer <PAT>` · `Accept: application/vnd.github+json` · `Content-Type: application/json` |
+| Body | `{"ref":"main","inputs":{"command":"all"}}` |
+| Lịch | mỗi 6 giờ (hoặc 3 lần/ngày) |
+
+Lưu ý: `command=all` chạy cả Job D/E/F (TMDB + mùa mới + Jikan) → 1 lần/ngày là đủ;
+các lần còn lại dùng `{"command":"schedule"}` cho nhẹ.
+
+**Cách B — pg_cron trong Supabase (không cần dịch vụ ngoài):** xem
+`supabase/CRON.sql` — tạo extension `pg_cron` + `pg_net`, lưu PAT trong bảng
+riêng có RLS bật, rồi `cron.schedule(...)` gọi đúng API trên.
+
+Sau khi đặt cron ngoài, kiểm lại bằng `bash scripts/check_cron.sh` (phải `exit 0`).
 
 ### 6c. Bật thông báo "tập mới vừa ra" (15 phút)
 

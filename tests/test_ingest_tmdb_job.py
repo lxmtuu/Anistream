@@ -17,6 +17,8 @@ from ingest import tmdb
 
 
 class FakeDB:
+    queries = None
+
     def __init__(self, anime_rows, existing_episodes=None):
         self.anime_rows = anime_rows
         self.existing_episodes = existing_episodes or {}
@@ -26,6 +28,8 @@ class FakeDB:
         self.dry = False
 
     def select(self, table, query):
+        if self.queries is not None:
+            self.queries.append((table, query))
         if table == "anime":
             return list(self.anime_rows)
         if table == "episodes":
@@ -210,6 +214,67 @@ class TestJobTmdb(unittest.TestCase):
         self._run(db)
         self.assertEqual(db.logs[-1][0], "tmdb")
         self.assertTrue(db.logs[-1][2])
+
+
+class TestJobTmdbRefresh(unittest.TestCase):
+    """`tmdb --refresh`: tập MỚI của bộ đang chiếu phải vào DB.
+
+    Lỗi cũ: điều kiện `or=(title_vi.is.null,…)` + `if not have` khiến bộ đang chiếu
+    đã có 2 tập thì KHÔNG BAO GIỜ nhận được tập 3 → "cập nhật thường xuyên" không
+    hoạt động dù chạy job mỗi ngày.
+    """
+
+    def _run(self, db, seasons=(1,), total=12, meta=None, eps=None):
+        return TestJobTmdb()._run(db, seasons=seasons, total=total, meta=meta, eps=eps)
+
+    def test_chi_chon_bo_dang_chieu(self):
+        db = FakeDB([dict(ROW)])
+        db.queries = []
+        with redirect_stdout(io.StringIO()):
+            with patch.object(tmdb, "is_configured", return_value=True), \
+                 patch.object(tmdb, "match_anime", return_value=MATCH), \
+                 patch.object(tmdb, "fetch_detail",
+                              side_effect=lambda tv: _detail(total=12)), \
+                 patch.object(tmdb, "fetch_season", return_value={"episodes": []}):
+                ingest_main.job_tmdb(db, refresh=True)
+        q = " ".join(q for t, q in db.queries if t == "anime")
+        self.assertIn("status=eq.RELEASING", q)
+        self.assertNotIn("title_vi.is.null", q, "refresh không được lọc theo trường thiếu")
+
+    def test_da_co_tap_van_lay_va_dem_tap_MOI(self):
+        db = FakeDB([dict(ROW, episodes_total=12)],
+                    existing_episodes={5: [{"number": 1}, {"number": 2}]})
+        self._run(db)                       # chế độ enrich: có tập → bỏ qua
+        self.assertEqual([u for u in db.upserted if u[0] == "episodes"], [])
+
+        db2 = FakeDB([dict(ROW, episodes_total=12)],
+                     existing_episodes={5: [{"number": 1}, {"number": 2}]})
+        with redirect_stdout(io.StringIO()) as buf:
+            with patch.object(tmdb, "is_configured", return_value=True), \
+                 patch.object(tmdb, "match_anime", return_value=MATCH), \
+                 patch.object(tmdb, "fetch_detail",
+                              side_effect=lambda tv: _detail(total=12)), \
+                 patch.object(tmdb, "fetch_season", return_value={"episodes": [
+                     {"episode_number": 1, "name": "A", "air_date": "2023-10-01"},
+                     {"episode_number": 2, "name": "B", "air_date": "2023-10-08"},
+                     {"episode_number": 3, "name": "C", "air_date": "2023-10-15"},
+                 ]}):
+                ingest_main.job_tmdb(db2, refresh=True)
+        ups = [u for u in db2.upserted if u[0] == "episodes"]
+        self.assertEqual(len(ups), 1, "refresh phải upsert dù đã có tập")
+        self.assertIn("1 tập MỚI", buf.getvalue())
+        self.assertIn("tập 3", buf.getvalue())
+
+    def test_log_ingest_ghi_job_refresh(self):
+        db = FakeDB([dict(ROW)])
+        with redirect_stdout(io.StringIO()):
+            with patch.object(tmdb, "is_configured", return_value=True), \
+                 patch.object(tmdb, "match_anime", return_value=MATCH), \
+                 patch.object(tmdb, "fetch_detail",
+                              side_effect=lambda tv: _detail(total=12)), \
+                 patch.object(tmdb, "fetch_season", return_value={"episodes": []}):
+                ingest_main.job_tmdb(db, refresh=True)
+        self.assertEqual(db.logs[-1][1], "refresh")
 
 
 if __name__ == "__main__":

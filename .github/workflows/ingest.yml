@@ -16,8 +16,11 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "schedule | catalog | youtube | tmdb | all"
+        description: "schedule | catalog | youtube | tmdb | seasons | jikan | all"
         default: "all"
+      extra:
+        description: "cờ thêm, vd: --refresh --limit-tmdb 200 (để trống nếu không cần)"
+        default: ""
 
 concurrency:
   group: ingest
@@ -45,6 +48,7 @@ jobs:
             "10 */6 * * *") echo "cmd=youtube"   >> $GITHUB_OUTPUT ;;
             "17 19 * * *")  echo "cmd=catalog"   >> $GITHUB_OUTPUT ;;
             "40 20 * * *")  echo "cmd=tmdb"      >> $GITHUB_OUTPUT ;;
+            # Job E/F không có cron riêng: chạy kèm Job D hằng ngày (dưới đây)
             *)              echo "cmd=${{ github.event.inputs.command || 'all' }}" >> $GITHUB_OUTPUT ;;
           esac
 
@@ -53,7 +57,31 @@ jobs:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TMDB_API_KEY:         ${{ secrets.TMDB_API_KEY }}
+          # Chỉ Muse Việt Nam (đổi thành "muse_vn,ani_one_asia" nếu muốn thêm kênh)
+          YOUTUBE_CHANNELS:     ${{ vars.YOUTUBE_CHANNELS || 'muse_vn' }}
           # Không có TMDB_API_KEY → job D báo rõ rồi bỏ qua (xem main.py)
           INGEST_COMMAND:       ${{ steps.pick.outputs.cmd }}
-        run: python -m ingest.main "$INGEST_COMMAND"
+          INGEST_EXTRA:         ${{ github.event.inputs.extra || '' }}
+        run: |
+          # `extra` cho phép bấm tay với cờ như --refresh; cron để trống.
+          # Không dùng eval để tránh chèn lệnh — chỉ tách theo khoảng trắng.
+          read -r -a EXTRA <<< "$INGEST_EXTRA"
+          python -m ingest.main "$INGEST_COMMAND" "${EXTRA[@]}"
+
+      # Job D hằng ngày: bổ sung bộ thiếu → LÀM MỚI bộ đang chiếu (bắt tập mới)
+      # → tìm MÙA MỚI qua quan hệ SEQUEL → lấp danh sách tập còn thiếu bằng Jikan.
+      # Trước đây chỉ có `tmdb` (chế độ bổ sung) nên tập mới của bộ đang chiếu
+      # KHÔNG BAO GIỜ được cập nhật.
+      - name: Job D/E/F hằng ngày (chỉ khi cron 20:40 hoặc dispatch "all")
+        if: github.event.schedule == '40 20 * * *' || github.event.inputs.command == 'all'
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TMDB_API_KEY:         ${{ secrets.TMDB_API_KEY }}
+        run: |
+          set -e
+          python -m ingest.main tmdb --limit-tmdb 200
+          python -m ingest.main tmdb --refresh --limit-tmdb 200
+          python -m ingest.main seasons --limit-seasons 120
+          python -m ingest.main jikan --limit-jikan 60
 

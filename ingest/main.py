@@ -21,7 +21,7 @@ import datetime as dt
 import sys
 import time
 
-from . import anilist, config, db as dbmod, match, tmdb, youtube
+from . import anilist, config, db as dbmod, jikan, match, tmdb, youtube
 
 
 # ─────────────────────────────────────────────── helpers
@@ -274,13 +274,25 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
 
 
 # ─────────────────────────────────────────────── Job D
-def job_tmdb(DB, limit: int = 60, with_episodes: bool = True):
+TMDB_COLS = ("id, slug, title_romaji, title_english, title_native, title_vi, "
+             "synopsis_vi, year, episodes_total, tmdb_id")
+
+
+def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
+             refresh: bool = False):
     """Bổ sung tiếng Việt (title_vi, synopsis_vi) + danh sách tập từ TMDB.
 
-    Vì sao cần: AniList không có tiếng Việt → app toàn hiện tên romaji; và chỉ
-    22/104 anime có episodes nên mở bộ khác là trang chi tiết trống.
+    Hai chế độ:
+
+    · mặc định (`refresh=False`) — **bổ sung** bộ còn thiếu dữ liệu. Điều kiện cũ
+      `or=(title_vi.is.null, …)` khiến bộ nào đã đủ 3 trường thì KHÔNG BAO GIỜ được
+      ghé lại, và danh sách tập chỉ lấy khi bảng trống → tập mới của bộ đang chiếu
+      không bao giờ vào. Đó là lý do "cập nhật thường xuyên" không hoạt động.
+    · `refresh=True` — **làm mới** mọi bộ đang chiếu (`status = RELEASING`): upsert
+      các tập MỚI của mùa đang phát (không chỉ khi bảng trống).
     """
-    print("\n▶ Job D — TMDB: tên + tóm tắt tiếng Việt, danh sách tập")
+    mode = "làm mới bộ đang chiếu" if refresh else "bổ sung bộ còn thiếu"
+    print(f"\n▶ Job D — TMDB: tên + tóm tắt tiếng Việt, danh sách tập  [{mode}]")
     if not tmdb.is_configured():
         raise RuntimeError(
             "Thiếu TMDB_API_KEY → không bổ sung được tiếng Việt.\n"
@@ -288,17 +300,24 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True):
             "  Thêm vào .env:  TMDB_API_KEY=xxxxxxxx"
         )
 
-    cols = ("id, slug, title_romaji, title_english, title_native, title_vi, "
-            "synopsis_vi, year, episodes_total, tmdb_id")
-    # Ưu tiên bộ phổ biến (người dùng thấy trước), và bộ còn thiếu dữ liệu.
-    rows = DB.select(
-        "anime",
-        f"select={cols}&or=(title_vi.is.null,synopsis_vi.is.null,episodes_total.is.null)"
-        f"&order=popularity.desc&limit={int(limit)}",
-    )
-    print(f"  · {len(rows)} anime cần làm giàu")
+    # Ưu tiên bộ phổ biến (người dùng thấy trước).
+    if refresh:
+        rows = DB.select(
+            "anime",
+            f"select={TMDB_COLS}&status=eq.RELEASING"
+            f"&order=popularity.desc&limit={int(limit)}",
+        )
+        print(f"  · {len(rows)} anime đang chiếu cần làm mới")
+    else:
+        rows = DB.select(
+            "anime",
+            f"select={TMDB_COLS}"
+            f"&or=(title_vi.is.null,synopsis_vi.is.null,episodes_total.is.null)"
+            f"&order=popularity.desc&limit={int(limit)}",
+        )
+        print(f"  · {len(rows)} anime cần làm giàu")
 
-    patched = eps_written = 0
+    patched = eps_written = new_episodes = 0
     no_match, no_vi, multi_season, implausible = [], [], [], []
     for i, row in enumerate(rows, 1):
         label = (row.get("title_english") or row.get("title_romaji") or row.get("slug"))[:46]
@@ -342,8 +361,16 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True):
             # (Trước đây còn đòi `episodes_total is null` → bộ nào AniList đã biết
             #  tổng số tập thì KHÔNG BAO GIỜ có danh sách tập. Đó là lỗi.)
             if with_episodes and matched:
-                have = DB.select("episodes", f"select=number&anime_id=eq.{row['id']}&limit=1")
-                if not have:
+                if refresh:
+                    # Đang chiếu → mỗi lần chạy phải lấy lại danh sách để bắt tập mới
+                    have = DB.select(
+                        "episodes", f"select=number&anime_id=eq.{row['id']}&limit=600")
+                    existing = {e.get("number") for e in have}
+                else:
+                    have = DB.select("episodes",
+                                     f"select=number&anime_id=eq.{row['id']}&limit=1")
+                    existing = set()
+                if refresh or not have:
                     season = tmdb.fetch_season(best["id"], season_no)
                     n_season = len([e for e in (season.get("episodes") or [])
                                     if isinstance(e.get("episode_number"), int)])
@@ -356,7 +383,17 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True):
                         if eps:
                             DB.upsert("episodes", eps, on_conflict="anime_id,number")
                             eps_written += len(eps)
-                            print(f"      + {len(eps)} tập (mùa {season_no}, {why})")
+                            new_eps = [e["number"] for e in eps
+                                       if e["number"] not in existing]
+                            if refresh:
+                                if new_eps:
+                                    print(f"      + {len(new_eps)} tập MỚI "
+                                          f"(mùa {season_no}, {why}): "
+                                          f"tập {', '.join(map(str, new_eps[:8]))}"
+                                          + ("…" if len(new_eps) > 8 else ""))
+                                    new_episodes += len(new_eps)
+                            else:
+                                print(f"      + {len(eps)} tập (mùa {season_no}, {why})")
         except tmdb.TmdbError:
             raise                      # lỗi cấu hình/mạng → nổ ngay, không nuốt
         except Exception as e:         # lỗi 1 bộ không được làm chết cả job
@@ -379,15 +416,124 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True):
         for n in implausible[:8]:
             print(f"      - {n}")
 
-    DB.log_ingest("tmdb", "enrich", True, patched + eps_written)
-    print(f"  ✓ {patched} anime được bổ sung · {eps_written} tập")
+    job_name = "refresh" if refresh else "enrich"
+    DB.log_ingest("tmdb", job_name, True, patched + eps_written)
+    if refresh:
+        print(f"  ✓ {patched} anime được cập nhật · {new_episodes} tập MỚI "
+              f"({eps_written} tập đã đồng bộ)")
+    else:
+        print(f"  ✓ {patched} anime được bổ sung · {eps_written} tập")
     return patched + eps_written
+
+
+# ─────────────────────────────────────────────── Job E
+def job_seasons(DB, limit: int = 80):
+    """Phát hiện MÙA MỚI qua quan hệ SEQUEL của AniList.
+
+    AniList tách mỗi mùa thành 1 entry riêng, nên "bộ X có mùa 2" không tự xuất
+    hiện trong DB: phải đi theo quan hệ SEQUEL. Trước đây không làm → app chỉ có
+    mùa mà job catalog/schedule tình cờ gặp.
+    """
+    print("\n▶ Job E — AniList relations: tìm mùa mới (SEQUEL)")
+    rows = DB.select(
+        "anime",
+        "select=id, slug, title_romaji, anilist_id, status&anilist_id=not.is.null"
+        f"&order=popularity.desc&limit={int(limit)}",
+    )
+    print(f"  · {len(rows)} anime sẽ kiểm quan hệ")
+    if not rows:
+        return 0
+
+    known = {r["anilist_id"] for r in rows if r.get("anilist_id")}
+    added, seen, failures = [], set(), 0
+    for i, row in enumerate(rows, 1):
+        try:
+            sups = anilist.sequels(row["anilist_id"])
+        except Exception as e:
+            print(f"  ! {row.get('slug')}: {type(e).__name__}: {str(e)[:120]}")
+            failures += 1
+            continue
+        for m in sups:
+            aid = m.get("id")
+            if not aid or aid in known or aid in seen:
+                continue
+            if not anilist.is_series_like(m):
+                continue
+            seen.add(aid)
+            added.append(m)
+            t = (m.get("title") or {}).get("romaji") or aid
+            print(f"  + mùa mới: {t}  (anilist {aid}, {m.get('episodes') or '?'} tập, "
+                  f"{m.get('seasonYear') or '?'}) ← {row.get('title_romaji')}")
+        if i % 20 == 0:
+            print(f"    … kiểm {i}/{len(rows)}")
+
+    if added:
+        _upsert_media(DB, added)
+
+    ok = failures == 0 or bool(added)
+    DB.log_ingest("anilist", "seasons", ok, len(added),
+                  error=f"{failures} bộ lỗi" if failures else "")
+    print(f"  ✓ {len(added)} mùa mới được thêm"
+          + (f" · {failures} bộ lỗi (đã bỏ qua)" if failures else ""))
+    return len(added)
+
+
+# ─────────────────────────────────────────────── Job F
+def job_jikan(DB, limit: int = 40, only_airing: bool = False):
+    """Lấp danh sách tập còn THIẾU bằng Jikan (MyAnimeList).
+
+    Vì sao cần: AniList chỉ có tổng số tập; TMDB đôi khi thiếu/lệch mùa. Jikan có
+    `title` + `aired` cho từng tập, miễn phí và không cần key, lại dùng đúng
+    `mal_id` mà AniList đã trả (`idMal`) nên không phải đoán tên.
+    """
+    print("\n▶ Job F — Jikan (MAL): lấp danh sách tập còn thiếu")
+    cols = "id, slug, title_romaji, mal_id, episodes_total, status"
+    q = (f"select={cols}&mal_id=not.is.null")
+    if only_airing:
+        q += "&status=eq.RELEASING"
+    q += f"&order=popularity.desc&limit={int(limit)}"
+    rows = DB.select("anime", q)
+    print(f"  · {len(rows)} anime có mal_id sẽ kiểm")
+
+    filled = written = skipped = errors = 0
+    for i, row in enumerate(rows, 1):
+        try:
+            have = DB.select("episodes",
+                             f"select=number&anime_id=eq.{row['id']}&limit=1")
+            if have:
+                skipped += 1
+                continue                      # đã có danh sách tập → không đụng
+            items = jikan.episodes(row["mal_id"])
+            eps = jikan.episode_rows(row["id"], items, row.get("episodes_total"))
+            if not eps:
+                print(f"  ! {row['slug'][:40]}: Jikan không có tập nào dùng được")
+                continue
+            DB.upsert("episodes", eps, on_conflict="anime_id,number")
+            filled += 1
+            written += len(eps)
+            print(f"  [{i}/{len(rows)}] {row['slug'][:40]:<40} "
+                  f"+{len(eps)} tập (mal {row['mal_id']})")
+        except jikan.JikanError as e:
+            errors += 1
+            print(f"  ! {row['slug'][:40]}: {str(e)[:120]}")
+        except Exception as e:
+            errors += 1
+            print(f"  ! {row['slug'][:40]}: {type(e).__name__}: {str(e)[:120]}")
+
+    ok = errors == 0 or filled > 0
+    DB.log_ingest("jikan", "episodes", ok, written,
+                  error=f"{errors} bộ lỗi" if errors else "")
+    print(f"  ✓ {filled} bộ được lấp · {written} tập · "
+          f"{skipped} bộ đã có tập (bỏ qua)"
+          + (f" · {errors} lỗi" if errors else ""))
+    return written
 
 
 # ─────────────────────────────────────────────── CLI
 def main(argv=None):
     ap = argparse.ArgumentParser(description="AniStream ingest worker")
-    ap.add_argument("command", choices=["schedule", "catalog", "youtube", "tmdb", "all"])
+    ap.add_argument("command", choices=["schedule", "catalog", "youtube", "tmdb",
+                                        "seasons", "jikan", "all"])
     ap.add_argument("--hours", type=int, default=26)
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--limit", type=int, default=25, help="số video mỗi kênh")
@@ -397,6 +543,15 @@ def main(argv=None):
                     help="lấy TOÀN BỘ lịch sử kênh (cần YOUTUBE_API_KEY)")
     ap.add_argument("--limit-tmdb", type=int, default=60,
                     help="số anime làm giàu mỗi lần chạy job TMDB")
+    ap.add_argument("--refresh", action="store_true",
+                    help="job tmdb: LÀM MỚI bộ đang chiếu (bắt tập mới), "
+                         "không chỉ bộ còn thiếu dữ liệu")
+    ap.add_argument("--limit-seasons", type=int, default=80,
+                    help="số anime kiểm quan hệ SEQUEL mỗi lần (job seasons)")
+    ap.add_argument("--limit-jikan", type=int, default=40,
+                    help="số anime lấp danh sách tập từ Jikan mỗi lần")
+    ap.add_argument("--only-airing", action="store_true",
+                    help="job jikan: chỉ xử lý bộ đang chiếu")
     ap.add_argument("--no-cache", action="store_true",
                     help="bỏ qua .cache/match_cache.json (ghép lại tên từ đầu)")
     ap.add_argument("--channel", default="",
@@ -430,16 +585,23 @@ def main(argv=None):
                                  use_cache=not args.no_cache,
                                  only_channel=args.channel)
         if args.command == "tmdb":
-            total += job_tmdb(DB, args.limit_tmdb)
-        elif args.command == "all":
-            # `all` chạy cả 4 job. Không có key TMDB thì BÁO RÕ rồi bỏ qua job D
-            # (không im lặng, và không làm đỏ cả lần chạy vì thiếu key tuỳ chọn).
+            total += job_tmdb(DB, args.limit_tmdb, refresh=args.refresh)
+        if args.command == "seasons":
+            total += job_seasons(DB, args.limit_seasons)
+        if args.command == "jikan":
+            total += job_jikan(DB, args.limit_jikan, args.only_airing)
+        if args.command == "all":
+            # Job D cần key; job E/F thì không → thiếu key TMDB KHÔNG được chặn E/F.
             if tmdb.is_configured():
+                # ngày chạy đầy đủ: bổ sung bộ thiếu + làm mới bộ đang chiếu
                 total += job_tmdb(DB, args.limit_tmdb)
+                total += job_tmdb(DB, args.limit_tmdb, refresh=True)
             else:
                 print("\n⚠ BỎ QUA Job D (TMDB): chưa có TMDB_API_KEY → "
                       "tên/tóm tắt tiếng Việt và danh sách tập sẽ không được bổ sung.")
                 DB.log_ingest("tmdb", "enrich", False, 0, "thiếu TMDB_API_KEY")
+            total += job_seasons(DB, args.limit_seasons)
+            total += job_jikan(DB, args.limit_jikan)
     except KeyboardInterrupt:
         print("\n… dừng theo yêu cầu")
         return 130

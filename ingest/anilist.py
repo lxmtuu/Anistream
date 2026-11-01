@@ -134,6 +134,40 @@ def search_media(title: str, per_page: int = 5) -> List[Dict]:
 
 
 # ──────────────────────────────────────────────────────────
+# Mùa MỚI: AniList ghi quan hệ PREQUEL/SEQUEL giữa các entry. Đây là cách DUY NHẤT
+# biết "bộ này vừa có mùa 2" mà không phải thêm tay từng bộ: mỗi mùa là một entry
+# riêng, và entry mùa 1 KHÔNG tự có tập của mùa 2.
+def sequels(media_id: int) -> List[Dict]:
+    """Các entry là SEQUEL (mùa sau) của `media_id`."""
+    q = """
+    query($id:Int){
+      Media(id:$id, type:ANIME){
+        id
+        relations{
+          edges{
+            relationType(version:2)
+            node{ %s }
+          }
+        }
+      }
+    }""" % MEDIA_FIELDS
+    data = gql(q, {"id": media_id})
+    edges = (((data.get("Media") or {}).get("relations") or {}).get("edges") or [])
+    out = []
+    for e in edges:
+        if (e.get("relationType") or "").upper() != "SEQUEL":
+            continue
+        node = e.get("node") or {}
+        if node.get("id"):
+            out.append(node)
+    return out
+
+
+def is_series_like(media: Dict) -> bool:
+    """SEQUEL dạng TV/ONA mới là 'mùa mới'; MOVIE/SPECIAL thì không cùng danh sách tập."""
+    return (media.get("format") or "").upper() in ("TV", "TV_SHORT", "ONA")
+
+
 def season_of(month: int) -> str:
     if month in (1, 2, 3):
         return "WINTER"

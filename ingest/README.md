@@ -58,6 +58,43 @@ Quy tắc **thà thiếu còn hơn sai**:
 Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API Key (v3)**.
 ⚠️ Không dùng "Read Access Token (v4)" — code gọi bằng `api_key`.
 
+## 6 job ingest
+
+| Job | Lệnh | Nguồn | Chạy |
+|---|---|---|---|
+| A | `schedule` | AniList lịch phát | 30 phút |
+| B | `catalog` | AniList theo mùa | hằng đêm |
+| C | `youtube` | Muse VN (YouTube) | 6 giờ |
+| D | `tmdb` | TMDB: tiếng Việt + tập | hằng ngày |
+| D' | `tmdb --refresh` | TMDB: **tập MỚI** của bộ đang chiếu | hằng ngày |
+| E | `seasons` | AniList `relations` → **mùa mới** | hằng ngày |
+| F | `jikan` | Jikan/MAL → lấp tập còn thiếu | hằng ngày |
+
+`all` = A + B + C + D + D' + E + F.
+
+### Vì sao cần D' và E (2 lỗi cũ)
+
+- **D'** — chế độ bổ sung chỉ chọn bộ `or=(title_vi.is.null, …)` và chỉ lấy tập khi
+  bảng **trống** → bộ đang chiếu đã có 5 tập thì KHÔNG BAO GIỜ nhận tập 6. `--refresh`
+  quét mọi bộ `status=RELEASING` và `upsert` tập mới (in `+ K tập MỚI`).
+- **E** — AniList tách mỗi mùa thành entry riêng, entry mùa 1 không có tập của mùa 2.
+  Job E đi theo quan hệ `SEQUEL` để thêm mùa mới (`+ mùa mới: … ← bộ gốc`).
+- **F** — AniList chỉ có tổng số tập, TMDB hay thiếu bản dịch. Jikan miễn phí, không
+  cần key, tra theo `mal_id` (bảng `anime` đã lưu từ `idMal`) → lấp `title` + `aired`.
+  Bỏ tập `filler` và tập vượt `episodes_total`.
+
+### Cron: GitHub không đủ tin cậy
+
+Đo thật ngày 01/11/2026: workflow "active" nhưng `event=schedule` = **0 run/10h**.
+Hai cách thay thế (đều kèm trong repo):
+
+```bash
+bash scripts/trigger_ingest.sh lxmtuu/Anistream all   # cần GH_TOKEN (Actions: write)
+```
+
+- **cron-job.org** — POST tới `…/dispatches` (xem bảng trong `BAN_LAM_TIEP.md` §6b)
+- **pg_cron trong Supabase** — chạy `supabase/CRON.sql` (không cần dịch vụ ngoài)
+
 ## Job C hoạt động thế nào (và vì sao hợp pháp)
 
 ```
