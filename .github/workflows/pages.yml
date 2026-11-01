@@ -3,14 +3,16 @@ name: pages
 # Bản web của app (mock data — không cần backend) deploy lên GitHub Pages.
 # Mục đích: xem app THẬT chạy trong trình duyệt, không cần cài Flutter.
 #
-# ── Bật 1 lần (chỉ chủ repo làm được) ──────────────────────────────────────
+# ── Cần bật 1 lần (chỉ chủ repo làm được, ~10 giây) ────────────────────────
 #   GitHub → repo Anistream → Settings → Pages
-#   → Build and deployment → Source: **GitHub Actions** (không phải "Deploy from a branch")
-# Sau đó mỗi lần push đụng app/ là web tự cập nhật. Link:
-#   https://<user>.github.io/Anistream/
+#   → Build and deployment → Source: **GitHub Actions**
+#   (hiện đang là "Deploy from a branch" → workflow này chỉ BUILD, không deploy)
+# Sau đó chạy lại workflow "pages" (Actions → pages → Re-run), hoặc push bất kỳ
+# thay đổi nào trong app/. Link: https://<user>.github.io/Anistream/
 #
-# Trước khi bật, workflow vẫn BUILD (để kiểm tra bản web biên dịch được) nhưng
-# tự bỏ qua bước deploy — nên CI không đỏ vì lý do cấu hình.
+# Vì sao phải gate: nếu Pages còn ở chế độ legacy, bước deploy sẽ bị GitHub từ
+# chối (và báo đỏ). Workflow tự kiểm tra trước để CI luôn phản ánh đúng sự thật
+# "code có build được hay không", không phải lỗi cấu hình.
 
 on:
   push:
@@ -36,27 +38,36 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
-      pages_enabled: ${{ steps.pages.outputs.enabled }}
+      can_deploy: ${{ steps.pages.outputs.can_deploy }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Kiểm tra GitHub Pages đã bật chưa
+      - name: Kiểm tra Pages đã bật + đúng chế độ chưa
         id: pages
+        continue-on-error: true
         run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' \
+          json=$(curl -s \
             -H "Authorization: Bearer ${{ github.token }}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/pages")
-          if [ "$code" = "200" ]; then enabled=true; else enabled=false; fi
-          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
-          if [ "$enabled" = "false" ]; then
-            echo "::warning::Pages chưa bật (HTTP $code) → vẫn build để kiểm tra, nhưng KHÔNG deploy. Bật: Settings → Pages → Source: GitHub Actions"
+            "https://api.github.com/repos/${{ github.repository }}/pages" || echo '{}')
+          build_type=$(echo "$json" | grep -o '"build_type":"[^"]*"' | cut -d'"' -f4)
+          echo "build_type=${build_type:-none}"
+
+          # Deploy chỉ chạy được khi Pages dùng GitHub Actions làm nguồn.
+          if [ "$build_type" = "workflow" ]; then
+            echo "can_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "can_deploy=false" >> "$GITHUB_OUTPUT"
             {
-              echo "### Pages chưa bật"
-              echo "Bản web **đã build thành công** nhưng chưa deploy được."
-              echo "Bật: Settings → Pages → Source: **GitHub Actions**, rồi chạy lại workflow này."
+              echo "### ⚠️ Pages chưa ở chế độ GitHub Actions"
+              echo "Trạng thái hiện tại: \`build_type=${build_type:-chưa bật}\`"
+              echo ""
+              echo "Bản web **đã build thành công** (đây là phần quan trọng — nó chứng minh code chạy được trên web)."
+              echo ""
+              echo "Để có link xem app: **Settings → Pages → Build and deployment → Source: GitHub Actions**, rồi chạy lại workflow này."
             } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Pages đang ở chế độ '$build_type' → bỏ qua deploy. Đổi Source sang 'GitHub Actions' trong Settings → Pages."
           fi
 
       - uses: subosito/flutter-action@v2
@@ -79,13 +90,23 @@ jobs:
             --dart-define=USE_MOCK=true
           echo "<!-- build ${GITHUB_SHA} · mock data · $(date -u +%FT%TZ) -->" >> build/web/index.html
 
+      # Giữ lại 3 trang xem trước tĩnh (poster thật, không cần mạng) để link cũ
+      # vẫn sống sau khi root Pages bị app Flutter chiếm chỗ.
+      - name: Copy trang xem trước tĩnh
+        run: |
+          mkdir -p app/build/web/previews
+          cp app/UI_PREVIEW.html app/build/web/previews/ui-preview.html
+          cp chon_mo_hinh.html app/build/web/previews/chon-mo-hinh.html
+          cp anime_report.html app/build/web/previews/anime-report.html
+          ls -la app/build/web/previews
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: app/build/web
 
   deploy:
     needs: build
-    if: needs.build.outputs.pages_enabled == 'true'
+    if: needs.build.outputs.can_deploy == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
