@@ -1,0 +1,95 @@
+name: pages
+
+# Bản web của app (mock data — không cần backend) deploy lên GitHub Pages.
+# Mục đích: xem app THẬT chạy trong trình duyệt, không cần cài Flutter.
+#
+# ── Bật 1 lần (chỉ chủ repo làm được) ──────────────────────────────────────
+#   GitHub → repo Anistream → Settings → Pages
+#   → Build and deployment → Source: **GitHub Actions** (không phải "Deploy from a branch")
+# Sau đó mỗi lần push đụng app/ là web tự cập nhật. Link:
+#   https://<user>.github.io/Anistream/
+#
+# Trước khi bật, workflow vẫn BUILD (để kiểm tra bản web biên dịch được) nhưng
+# tự bỏ qua bước deploy — nên CI không đỏ vì lý do cấu hình.
+
+on:
+  push:
+    branches:
+      - main
+      - arena/95786384-anistream
+    paths:
+      - "app/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      pages_enabled: ${{ steps.pages.outputs.enabled }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Kiểm tra GitHub Pages đã bật chưa
+        id: pages
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pages")
+          if [ "$code" = "200" ]; then enabled=true; else enabled=false; fi
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          if [ "$enabled" = "false" ]; then
+            echo "::warning::Pages chưa bật (HTTP $code) → vẫn build để kiểm tra, nhưng KHÔNG deploy. Bật: Settings → Pages → Source: GitHub Actions"
+            {
+              echo "### Pages chưa bật"
+              echo "Bản web **đã build thành công** nhưng chưa deploy được."
+              echo "Bật: Settings → Pages → Source: **GitHub Actions**, rồi chạy lại workflow này."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: flutter pub get
+        working-directory: app
+        run: flutter pub get
+
+      # --base-href phải khớp đường dẫn Pages (/<tên-repo>/) — sai thì trình duyệt
+      # tải main.dart.js từ sai chỗ và chỉ thấy trang trắng.
+      # USE_MOCK=true: dữ liệu sinh thật từ AniList/YouTube, không cần Supabase.
+      - name: flutter build web
+        working-directory: app
+        run: |
+          flutter build web --release \
+            --base-href "/${GITHUB_REPOSITORY#*/}/" \
+            --dart-define=USE_MOCK=true
+          echo "<!-- build ${GITHUB_SHA} · mock data · $(date -u +%FT%TZ) -->" >> build/web/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/build/web
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.pages_enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
