@@ -152,22 +152,38 @@ SQL_COLS = ("id, episode_number, url, source_title, "
             "anime(id, slug, episodes_total)")
 
 
-def load_links(DB, slug: str = "", limit: int = 0) -> List[Dict]:
+# Kênh → mã vùng dùng trong `streaming_links.region`
+CHANNEL_REGION = {"muse_vn": "VN", "ani_one_asia": "AS"}
+
+
+def load_links(DB, slug: str = "", limit: int = 0, region: str = "") -> List[Dict]:
     q = (f"select={SQL_COLS}&kind=eq.free_legal&is_verified=eq.true"
          f"&order=anime_id.asc,episode_number.asc")
     if slug:
         # PostgREST: lọc theo bảng nhúng bằng `anime.slug`
         q += f"&anime.slug=eq.{slug}"
+    if region:
+        q += f"&region=eq.{region}"
     if limit:
         q += f"&limit={int(limit)}"
     return DB.select("streaming_links", q)
 
 
+def count_other_regions(DB, keep: str) -> int:
+    """Số link của kênh KHÁC (dùng để báo trước khi xoá)."""
+    rows = DB.select("streaming_links",
+                     "select=id&kind=eq.free_legal&region=neq." + keep + "&limit=1000")
+    return len(rows)
+
+
 def run(DB, slug: str = "", limit: int = 0, fix: bool = False,
-        prune_over_total: bool = False,
+        prune_over_total: bool = False, channel: str = "",
         title_fetcher: Callable[[str], Optional[str]] = fetch_title) -> Dict[str, int]:
     print("\n▶ Audit streaming_links — có link nào gán sai số tập?")
-    rows = load_links(DB, slug, limit)
+    region = CHANNEL_REGION.get(channel, channel)
+    if region:
+        print(f"  · chỉ xét kênh {channel or region} (region={region})")
+    rows = load_links(DB, slug, limit, region)
     print(f"  · {len(rows)} link free_legal"
           + (f" (slug={slug})" if slug else ""))
     if not rows:
@@ -254,6 +270,20 @@ def run(DB, slug: str = "", limit: int = 0, fix: bool = False,
             DB.delete("streaming_links", {"id": f["id"]})
             pruned += 1
 
+    if region:
+        others = count_other_regions(DB, region)
+        if others:
+            print(f"\n  · {others} link của kênh khác (region ≠ {region}) — xoá vì "
+                  f"chỉ giữ kênh {channel or region}")
+            # Lấy id rồi xoá từng dòng (PostgREST không có DELETE … WHERE IN qua
+            # query string an toàn; số lượng nhỏ nên xoá từng dòng là ổn)
+            extra = DB.select("streaming_links",
+                              f"select=id&kind=eq.free_legal&region=neq.{region}"
+                              f"&limit=1000")
+            for r in extra:
+                DB.delete("streaming_links", {"id": r["id"]})
+            print(f"  ✓ đã xoá {len(extra)} link kênh khác")
+
     print(f"\n  ✓ đã ghi source_title: {fixed_title}")
     print(f"  ✓ sửa số tập: {fixed_ep}")
     print(f"  ✓ xoá (tiêu đề không dùng được): {deleted}")
@@ -273,6 +303,9 @@ def main(argv=None) -> int:
                     help="GHI: lưu source_title, sửa số tập, xoá link rác")
     ap.add_argument("--prune-over-total", action="store_true",
                     help="kèm --fix: xoá luôn link vượt tổng số tập AniList")
+    ap.add_argument("--channel", default="",
+                    help="chỉ xét 1 kênh: muse_vn | ani_one_asia "
+                         "(kèm --fix sẽ XOÁ link của kênh khác)")
     args = ap.parse_args(argv)
 
     try:
@@ -281,7 +314,8 @@ def main(argv=None) -> int:
         print(f"\n✗ {e}")
         return 2
     try:
-        run(DB, args.slug, args.limit, args.fix, args.prune_over_total)
+        run(DB, args.slug, args.limit, args.fix, args.prune_over_total,
+            args.channel)
     except KeyboardInterrupt:
         print("\n… dừng theo yêu cầu")
         return 130

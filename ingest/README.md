@@ -69,6 +69,36 @@ https://www.youtube.com/feeds/videos.xml?channel_id=UC...   (oEmbed không đả
 - **Không** trích xuất stream (không `youtube_explode`, không `yt-dlp`) → không vi phạm ToS YouTube.
 - oEmbed chỉ là kiểm tra sơ bộ; HTTP 200 không đảm bảo video nhúng được hoặc không bị chặn theo vùng.
 
+### Chỉ dùng kênh Muse Việt Nam
+
+Mặc định ingest **chỉ lấy Muse Việt Nam** (kênh có bản Việt sub/lồng tiếng):
+
+```bash
+# .env — muốn bật thêm kênh khác thì liệt kê, cách nhau bằng dấu phẩy
+YOUTUBE_CHANNELS=muse_vn
+# YOUTUBE_CHANNELS=muse_vn,ani_one_asia
+```
+
+Tên kênh sai chính tả → nổ ngay kèm danh sách hợp lệ (không "chạy xong mà không
+lấy được gì").
+
+### Xếp đúng BỘ và MÙA cho Muse VN
+
+Muse đăng theo mùa: `One Punch Man - Mùa 2 - Tập 5`, `Fairy Tail (S3) - Tập 51`.
+AniList tách mỗi mùa thành entry riêng, nên phải chọn đúng entry:
+
+| Luật | Ví dụ |
+|---|---|
+| `parse_title` đọc mùa từ `Mùa 2` / `Season 2` / `Phần 2` / `(S2)` | `series_base` = tên không kèm mùa |
+| Đọc **năm** trong tiêu đề (`(2011)`, `2014`) | `Hunter x Hunter (2011)` → `year_hint=2011` |
+| Có mùa > 1 → **chỉ** nhận entry có ghi mùa đó | `One Punch Man 2nd Season` |
+| Chưa có entry mùa đó → **không** gán vào mùa 1 | báo "chưa có entry mùa 2 (AniList)" |
+| Loại entry không đủ chỗ cho tập | `Hunter x Hunter` 1999 (62 tập) bị loại khi có tập 148 |
+| Tập > tổng số tập của bộ → **không ghi** | in `⚠ series có tập VƯỢT tổng số tập` |
+
+Nhờ vậy 2 lỗi thật đã hết: 86 link tập 63–148 bị nhét vào entry 62 tập, và 102 link
+tập 176–277 bị nhét vào entry 175 tập.
+
 ### Backfill toàn bộ lịch sử kênh (quan trọng!)
 
 RSS chỉ trả **15 video mới nhất/kênh** → mỗi bộ chỉ có 1–4 tập. Một lựa chọn khác cần Google Cloud/API key (không đảm bảo số lượng tập):

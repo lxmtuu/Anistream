@@ -259,6 +259,30 @@ select count(distinct anime_id) from streaming_links where kind='free_legal' and
 select count(*) from streaming_links where kind='free_legal' and is_verified;
 ```
 
+### Chỉ giữ Muse Việt Nam + xếp đúng bộ/mùa
+
+Bản mới **mặc định chỉ ingest Muse Việt Nam** (`YOUTUBE_CHANNELS=muse_vn` trong
+`.env`), và chọn đúng entry AniList của từng mùa: đọc `Mùa 2`/`Season 2`/`(S2)` và
+năm trong tiêu đề, loại entry không đủ chỗ cho tập, **không ghi** link có tập vượt
+tổng số tập của bộ.
+
+Dọn link của kênh khác (Ani-One) và link sai tập — chạy **sau khi** đã ingest lại:
+
+```bash
+python3 -m ingest.audit --channel muse_vn            # chỉ xem, in báo cáo
+python3 -m ingest.audit --channel muse_vn --fix      # sửa + XOÁ link kênh khác
+```
+
+`--fix --channel muse_vn` làm 3 việc: lưu `source_title`, sửa/xoá link sai số tập,
+và xoá mọi link `region ≠ VN` (kênh Ani-One) để app chỉ còn nội dung Muse VN.
+
+Kiểm lại sau khi chạy:
+
+```sql
+select region, count(*) as so_link, count(distinct anime_id) as so_bo
+from streaming_links where kind = 'free_legal' group by region;   -- chỉ còn VN
+```
+
 **Kiểm xem bộ nào bị gán sai tập** (công cụ mới, không cần key YouTube):
 
 ```bash

@@ -109,7 +109,7 @@ def _link_rows(DB, videos, cache, verbose=True):
         value = unicodedata.normalize("NFKC", value or "").casefold()
         return re.sub(r"[^\w]+", " ", value).strip()
 
-    matched, unmatched = [], {}
+    matched, unmatched, need_review = [], {}, {}
     for i, v in enumerate(videos, 1):
         media, confidence, how = match.resolve(
             v["series"], cache, want_series=(v["episode"] > 0))
@@ -125,10 +125,21 @@ def _link_rows(DB, videos, cache, verbose=True):
             if verbose and i % 50 == 0:
                 print(f"    … ghép tên {i}/{len(videos)}")
             continue
+
+        # Chốt chặn: KHÔNG bao giờ ghi link có số tập vượt tổng số tập của bộ.
+        # Ca thật: Muse đăng "Hunter x Hunter (2011)" 148 tập nhưng AniList entry
+        # khớp tên là bản 1999 (62 tập) → 86 link bị gán sai bộ và hiện lẫn trong
+        # danh sách tập của bộ kia. Thà bỏ và báo ra để biết còn hơn ghi bừa.
+        total = media.get("episodes")
+        if isinstance(total, int) and total > 0 and v["episode"] > total:
+            key = f'{v["series"]} (tập {v["episode"]} > {total} tập)'
+            need_review[key] = need_review.get(key, 0) + 1
+            continue
+
         matched.append((v, media, confidence, how))
 
     if not matched:
-        return [], [], unmatched
+        return [], [], unmatched, need_review
 
     # upsert anime trước để có id
     rows, id_map = _upsert_media(DB, [m for _, m, _, _ in matched])
@@ -153,7 +164,7 @@ def _link_rows(DB, videos, cache, verbose=True):
             # parse sai (vd bản gộp "Tập 01-24" từng bị gán thành tập 1).
             "source_title": (v.get("raw_title") or "")[:300] or None,
         })
-    return rows, links, unmatched
+    return rows, links, unmatched, need_review
 
 
 def job_youtube(DB, limit: int = 25, check_embed: bool = True,
@@ -178,12 +189,13 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
         print(f"  · cache ghép tên: {len(cache)} tên "
               f"({known} đã khớp, {len(cache) - known} đã biết là không khớp)")
 
-    channels = [c for c in youtube.CHANNELS if not only_channel or c["key"] == only_channel]
+    channels = [c for c in youtube.enabled_channels()
+                if not only_channel or c["key"] == only_channel]
     if not channels:
         raise RuntimeError(f"không có kênh nào khớp --channel={only_channel}")
 
     total_rows = total_links = 0
-    all_unmatched = {}
+    all_unmatched, all_review = {}, {}
     failures = []
 
     for n, ch in enumerate(channels, 1):
@@ -202,7 +214,7 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
             continue
 
         try:
-            rows, links, unmatched = _link_rows(DB, videos, cache)
+            rows, links, unmatched, need_review = _link_rows(DB, videos, cache)
         except Exception as e:
             print(f"  ✗ lỗi khi ghép tên/ghi {ch['name']}: {type(e).__name__}: {e}")
             failures.append(f"{ch['name']}: {e}")
@@ -212,6 +224,8 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
 
         for name, cnt in unmatched.items():
             all_unmatched[name] = all_unmatched.get(name, 0) + cnt
+        for name, cnt in need_review.items():
+            all_review[name] = all_review.get(name, 0) + cnt
 
         print(f"  · khớp được {sum(1 for _ in links)}/{len(videos)} video "
               f"({len(unmatched)} tên series chưa khớp)")
@@ -235,6 +249,12 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
         print(f"\n  ⚠ {len(all_unmatched)} tên series chưa khớp "
               f"(thêm vào ingest/aliases.json rồi chạy lại):")
         for name, cnt in sorted(all_unmatched.items(), key=lambda x: -x[1])[:15]:
+            print(f"      - {name}  ({cnt} video)")
+
+    if all_review:
+        print(f"\n  ⚠ {len(all_review)} series có tập VƯỢT tổng số tập của bộ đang ghép "
+              f"→ KHÔNG ghi (nghi sai bộ/mùa):")
+        for name, cnt in sorted(all_review.items(), key=lambda x: -x[1])[:15]:
             print(f"      - {name}  ({cnt} video)")
 
     ok = not failures

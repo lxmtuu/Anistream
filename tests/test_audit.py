@@ -202,5 +202,44 @@ class TestDeleteSafety(unittest.TestCase):
         self.assertIn("[dry-run] delete", buf.getvalue())
 
 
+class TestChiMuseVN(unittest.TestCase):
+    """Chỉ giữ nội dung Muse VN: lọc region và xoá link kênh khác."""
+
+    def test_kenh_map_dung_region(self):
+        self.assertEqual(audit.CHANNEL_REGION["muse_vn"], "VN")
+        self.assertEqual(audit.CHANNEL_REGION["ani_one_asia"], "AS")
+
+    def test_loc_region_trong_query(self):
+        db = FakeDB([dict(ROW)])
+        with redirect_stdout(io.StringIO()):
+            audit.run(db, channel="muse_vn", title_fetcher=lambda v: None)
+        self.assertIn("region=eq.VN", db.queries[0])
+
+    def test_fix_channel_muse_xoa_link_kenh_khac(self):
+        db = FakeDB([dict(ROW, source_title="One Punch Man - Tập 1")])
+        # lần select thứ 2 trả về link kênh khác
+        calls = {"n": 0}
+
+        def select(table, query):
+            db.queries.append(query)
+            calls["n"] += 1
+            if "region=neq.VN" in query:
+                return [{"id": 90}, {"id": 91}]
+            return list(db.rows)
+
+        db.select = select
+        with redirect_stdout(io.StringIO()) as buf:
+            audit.run(db, channel="muse_vn", fix=True, title_fetcher=lambda v: None)
+        deleted = [f["id"] for _, f in db.deletes]
+        self.assertEqual(deleted, [90, 91])
+        self.assertIn("đã xoá 2 link kênh khác", buf.getvalue())
+
+    def test_khong_bat_channel_thi_khong_xoa_gi(self):
+        db = FakeDB([dict(ROW, source_title="One Punch Man - Tập 1")])
+        with redirect_stdout(io.StringIO()):
+            audit.run(db, fix=True, title_fetcher=lambda v: None)
+        self.assertEqual(db.deletes, [])
+
+
 if __name__ == "__main__":
     unittest.main()
