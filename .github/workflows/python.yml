@@ -1,0 +1,48 @@
+name: python
+
+# CI cho worker ingest (Python): unit test + kiểm cú pháp toàn bộ ingest/.
+#
+# Vì sao thêm: trước đây chỉ có CI cho `supabase/**` (edge) và `app/**` (Flutter).
+# Sửa `ingest/**` thì KHÔNG workflow nào chạy → test 20 cái trong `tests/` chưa
+# bao giờ được enforce. Hệ quả thật: lỗi gửi epoch giây vào cột timestamptz
+# (Postgres 22008) lọt qua review, chỉ nổ khi chạy `ingest` lần đầu trên máy thật.
+
+on:
+  push:
+    paths:
+      - "ingest/**"
+      - "tests/**"
+      - "scripts/preflight.sh"
+      - ".github/workflows/python.yml"
+  pull_request:
+    paths:
+      - "ingest/**"
+      - "tests/**"
+      - "scripts/preflight.sh"
+      - ".github/workflows/python.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: python-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cài dependency
+        run: pip install -r ingest/requirements.txt
+
+      - name: Kiểm cú pháp toàn bộ ingest/
+        run: python -m compileall -q ingest
+
+      - name: Chạy unit test
+        run: python -m unittest discover -s tests -v
