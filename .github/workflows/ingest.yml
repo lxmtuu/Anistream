@@ -2,9 +2,16 @@ name: ingest
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # Job A: lịch phát
-    - cron: "0 */6 * * *"    # Job C: video official
+    # ⚠️ Các cron KHÔNG được trùng phút: GitHub tạo 1 run cho MỖI cron khớp thời
+    # điểm, nên "*/30" và "0 */6" cùng bắn ở phút 0 của mỗi 6 giờ → 2 run chạy
+    # nối tiếp nhau (concurrency group), gọi AniList/YouTube 2 lần vô ích.
+    - cron: "*/30 * * * *"   # Job A: lịch phát (mỗi 30')
+    - cron: "10 */6 * * *"   # Job C: video official (lệch 10' để không trùng A)
     - cron: "17 19 * * *"    # Job B: catalog (02:17 giờ VN)
+    #
+    # ⚠️ GitHub TỰ TẮT scheduled workflow sau 60 ngày repo không có commit mới.
+    # Run do cron tạo ra không tính là "hoạt động". Nếu app im lặng quá 2 tháng,
+    # vào Actions → ingest → "Enable workflow".
   workflow_dispatch:
     inputs:
       command:
@@ -34,7 +41,7 @@ jobs:
         run: |
           case "${{ github.event.schedule }}" in
             "*/30 * * * *") echo "cmd=schedule"  >> $GITHUB_OUTPUT ;;
-            "0 */6 * * *")  echo "cmd=youtube"   >> $GITHUB_OUTPUT ;;
+            "10 */6 * * *") echo "cmd=youtube"   >> $GITHUB_OUTPUT ;;
             "17 19 * * *")  echo "cmd=catalog"   >> $GITHUB_OUTPUT ;;
             *)              echo "cmd=${{ github.event.inputs.command || 'all' }}" >> $GITHUB_OUTPUT ;;
           esac

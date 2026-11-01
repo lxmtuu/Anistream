@@ -97,6 +97,26 @@ export function planMessages(
   return targets;
 }
 
+/** Khoá "anime:tập" — dùng chung cho mọi chỗ so khớp đã gửi. */
+export function episodeKey(animeId: number, episode: number): string {
+  return `${animeId}:${episode}`;
+}
+
+/** Tập CHƯA gửi (lọc theo danh sách đã gửi). */
+export function unsentEpisodes<T extends { anime_id: number; number: number }>(
+  episodes: T[],
+  sentKeys: Set<string>,
+): T[] {
+  return episodes.filter((e) => !sentKeys.has(episodeKey(e.anime_id, e.number)));
+}
+
+/** Tập vừa GIÀNH được quyền gửi (kết quả upsert ignoreDuplicates). */
+export function keysOf(
+  rows: { anime_id: number; episode_number: number }[],
+): Set<string> {
+  return new Set(rows.map((r) => episodeKey(r.anime_id, r.episode_number)));
+}
+
 /** Đếm số thiết bị quan tâm 1 bộ — dùng để ghi `recipients`. */
 export function recipientsFor(subs: Subscription[], animeId: number): number {
   return subs.filter((s) => s.anime_ids.includes(animeId)).length;

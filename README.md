@@ -19,7 +19,8 @@
 | 5b | Auth + đồng bộ watchlist đa thiết bị (Supabase Auth) | ⏭ |
 | 6 | Desktop build + submit store | ⏭ |
 | 7 | CI `flutter analyze` + test cho app | ✅ |
-| 8 | Bản web trên GitHub Pages (xem app không cần cài Flutter) | ✅ code xong, ⏳ chờ bật Pages |
+| 8 | Bản web trên GitHub Pages (xem app không cần cài Flutter) | ✅ live |
+| 9 | CI cho Edge Functions (`bash scripts/test_edge.sh`, 13 test) | ✅ |
 
 > Rà soát toàn repo 01/11/2026: xem **`BAO_CAO_RA_SOAT.md`** (6 lỗi thật đã sửa,
 > 5 lỗi TypeScript/Python đã kiểm tra sạch, phần còn tồn đọng + lý do).
@@ -44,6 +45,7 @@
 ├── tools/                    gen_mock.py · gen_preview.py
 └── scripts/
     ├── preflight.sh          kiểm tra .env + schema + key (anon hay service_role) trước khi ingest
+    ├── test_edge.sh          test logic push bằng Node (không cần Deno)
     ├── test_api.sh           smoke test 4 endpoint
     └── setup_app.sh/.ps1     sinh thư mục platform còn thiếu
 ```

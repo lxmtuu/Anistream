@@ -1,6 +1,6 @@
 # supabase — Backend API cho AniStream (Edge Functions / Deno)
 
-4 endpoint, **chỉ đọc** catalog, cache ở CDN. Không có endpoint ghi (v1 dùng
+4 endpoint đọc + `/push` cho cron, **chỉ đọc** catalog, cache ở CDN. Không có endpoint ghi (v1 dùng
 PostgREST + RLS trực tiếp từ app khi cần watchlist — xem `db/schema.sql` phần RLS).
 
 | Function | Method | Mô tả | Cache |
@@ -67,13 +67,24 @@ Kết quả mong đợi của `/home` (rút gọn):
 }
 ```
 
+## 2a. Test (không cần Supabase)
+
+```bash
+bash scripts/test_edge.sh     # 13 test: chống spam, chống gửi trùng, nội dung tin
+```
+
+Cách làm: esbuild transpile `_shared/push_plan.ts` → JS, rồi `node --test`.
+Chạy tự động ở `.github/workflows/edge.yml` mỗi khi sửa `supabase/`.
+
 ## 2b. Push "tập mới vừa ra" (`/push`)
 
 Cron gọi mỗi **10–15 phút**. Luồng:
 
 ```
 episodes (airing_at trong 25' gần nhất)
-   → trừ những cặp (anime, tập) đã có trong sent_episode_pushes
+   → GIÀNH quyền gửi: insert vào sent_episode_pushes với ignoreDuplicates
+     (chỉ lần cron nào insert được dòng mới mới gửi → 2 lần cron chồng nhau
+      không gửi trùng; nếu gửi thất bại toàn bộ thì nhả quyền để lần sau thử lại)
    → tìm push_subscriptions CÓ bộ đó trong anime_ids (toán tử overlaps, dùng GIN index)
    → mỗi thiết bị chỉ 1 tin/1 bộ, chọn tập SỐ LỚN NHẤT (tránh spam)
    → FCM HTTP v1 (OAuth2 JWT RS256 từ service account)
