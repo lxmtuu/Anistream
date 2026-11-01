@@ -133,6 +133,46 @@ Kèm 2 lỗi nữa cùng đợt:
 supabase functions deploy home search schedule anime push
 ```
 
+### PGRST102 "All object keys must match" (lỗi thật 02/11/2026)
+
+Job E chạy 6 phút, in ra ~50 mùa mới, rồi **chết ở bước ghi**:
+
+```
+RuntimeError: upsert anime lỗi 400: {"code":"PGRST102", "message":"All object keys must match"}
+```
+
+Nguyên nhân: PostgREST bắt **mọi object trong một mảng JSON phải có CÙNG bộ khoá**.
+Ta cố ý bỏ khoá rỗng khỏi payload (để `merge-duplicates` không ghi NULL đè
+`episodes_total`/`cover_url`/`title`), nên trong 1 lô có row 17 khoá lẫn row 15
+khoá → cả request bị từ chối. Job A (`episodes`) cũng dính y hệt (tập có
+`airing_at` vs tập không).
+
+Hai bản vá:
+1. `db._group_by_keys()` — chia lô thành các nhóm **đồng nhất bộ khoá**, gửi
+   nhiều request. KHÔNG san phẳng bằng cách điền `None` (làm vậy là quay lại đúng
+   lỗi ghi NULL đè).
+2. `job_seasons` ghi **theo lô 25** thay vì gom hết rồi ghi một lần → lỗi giữa
+   đường chỉ mất phần còn lại, không mất trắng 6 phút công.
+
+### Job F hỏng mạng: phải ĐỎ, và phải dừng sớm
+
+Đo 02/11/2026 trên máy Windows của chủ dự án: **39/39** bộ Jikan `ConnectTimeout`,
+job in 39 dòng lỗi rồi **exit 0** (mất 856 giây). Hai bản vá:
+
+1. **Nổ khi không lấp được bộ nào** (`filled == 0 and errors > 0`) → exit ≠ 0.
+2. **Cầu dao**: 5 bộ liên tiếp không kết nối được → dừng ngay, không chờ hết.
+3. `ingest/net.py`: khi request ĐẦU TIÊN lỗi kết nối, **ép IPv4** rồi thử lại —
+   nguyên nhân phổ biến nhất của ConnectTimeout hàng loạt trên Windows là máy ưu
+   tiên IPv6 nhưng đường ra IPv6 không thông.
+
+Chẩn đoán tay (Git Bash):
+
+```bash
+curl -4 -sS -m 20 -o /dev/null -w '%{http_code}\n' https://api.jikan.moe/v4/anime/30276/episodes
+```
+
+`200` → mạng ổn. `000` → ISP/proxy chặn: đặt `HTTPS_PROXY=http://host:port` trong `.env`.
+
 ### Cron: GitHub không đủ tin cậy
 
 Đo thật ngày 01/11/2026: workflow "active" nhưng `event=schedule` = **0 run/10h**.

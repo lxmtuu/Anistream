@@ -14,11 +14,11 @@ Không dùng Jikan để lấy ảnh/nhân vật/thống kê — chỉ danh sác
 """
 import datetime as dt
 import time
-from typing import Any, Dict, List, Optional
 
 import requests
+from typing import Any, Dict, List, Optional
 
-from . import config
+from . import config, net
 
 API = "https://api.jikan.moe/v4"
 MIN_INTERVAL = 0.4      # 3 req/s theo giới hạn Jikan
@@ -41,12 +41,18 @@ def _throttle() -> None:
 def _get(path: str, params: Optional[Dict[str, Any]] = None, retries: int = 3) -> Dict:
     for attempt in range(retries):
         _throttle()
-        r = requests.get(
-            f"{API}{path}",
-            params=params or {},
-            headers={"User-Agent": config.USER_AGENT},
-            timeout=config.HTTP_TIMEOUT,
-        )
+        try:
+            # net.get tự thử lại + tự chuyển IPv4 khi ConnectTimeout (ca thật
+            # 02/11/2026: 39/39 bộ timeout trên Windows).
+            r = net.get(
+                f"{API}{path}",
+                params=params or {},
+                headers={"User-Agent": config.USER_AGENT},
+                timeout=config.HTTP_TIMEOUT,
+                session=requests,
+            )
+        except net.NetworkError as e:
+            raise JikanError(str(e)) from e
         if r.status_code == 429:
             raw = r.headers.get("Retry-After", "2")
             try:

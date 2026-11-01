@@ -221,10 +221,12 @@ mồ côi. Chạy tay:
 python3 -m ingest.main check
 ```
 
-**Phải deploy lại edge function** (code `/home`, `/anime`, `/search`, `push` đổi):
+**Phải deploy lại edge function** (code `/home`, `/anime`, `/search`, `push` đổi).
+Chưa cài Supabase CLI thì dùng npx, nhưng phải đăng nhập trước:
 
 ```bash
-supabase functions deploy home search schedule anime push
+npx --yes supabase@latest login
+npx --yes supabase@latest functions deploy home search schedule anime push --project-ref snpzrblwiamqtrnifdis
 ```
 
 ### Vá 01/11/2026 — bộ có video nhưng 0 tập, và bộ thiếu mùa 1

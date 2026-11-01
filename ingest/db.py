@@ -15,6 +15,30 @@ from . import config
 BATCH = 200          # số row mỗi request PostgREST
 
 
+def _group_by_keys(rows: List[Dict]) -> List[List[Dict]]:
+    """Chia lô thành các nhóm CÓ CÙNG BỘ KHOÁ (giữ nguyên thứ tự).
+
+    Vì sao bắt buộc: PostgREST từ chối cả request khi các object trong mảng JSON
+    không có cùng khoá — lỗi thật 02/11/2026:
+        PGRST102 "All object keys must match"
+    Ta CỐ Ý bỏ khoá rỗng khỏi payload (để upsert merge-duplicates không ghi NULL
+    đè dữ liệu tốt), nên trong 1 lô sẽ có row 17 khoá và row 15 khoá. Không nhóm
+    lại thì job E chết sạch, và job A (episodes) cũng chết vì lý do y hệt.
+
+    KHÔNG được "san phẳng" bằng cách điền None cho đủ khoá: làm vậy là quay lại
+    đúng cái lỗi ghi NULL đè mà ta đang sửa.
+    """
+    groups: Dict[frozenset, List[Dict]] = {}
+    order: List[frozenset] = []
+    for r in rows:
+        k = frozenset(r.keys())
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(r)
+    return [groups[k] for k in order]
+
+
 
 class DB:
     def __init__(self, dry_run: bool | None = None):
@@ -52,7 +76,8 @@ class DB:
         for i in range(0, len(rows), BATCH):
             batch = rows[i:i + BATCH]
             try:
-                out.extend(self._post_batch(table, batch, on_conflict))
+                for group in self._groups(batch):
+                    out.extend(self._post_batch(table, group, on_conflict))
             except RuntimeError as e:
                 if not fallback_per_row or len(batch) == 1:
                     raise
@@ -71,6 +96,11 @@ class DB:
             if len(failed) > 10:
                 print(f"      … và {len(failed) - 10} row nữa")
         return out
+
+    @staticmethod
+    def _groups(batch: List[Dict]) -> List[List[Dict]]:
+        """Chia nhóm theo bộ khoá (xem `_group_by_keys`). Tách riêng để test."""
+        return _group_by_keys(batch)
 
     def _post_batch(self, table: str, batch: List[Dict], on_conflict: str) -> List[Dict]:
         r = requests.post(
