@@ -618,6 +618,7 @@ def job_jikan(DB, limit: int = 40, only_airing: bool = False,
     print(f"  · {len(rows)} anime có mal_id sẽ kiểm")
 
     filled = written = skipped = errors = 0
+    net_errors_in_a_row = 0        # "cầu dao" khi mạng chết hẳn
     for i, row in enumerate(rows, 1):
         try:
             have_rows = DB.select(
@@ -646,9 +647,24 @@ def job_jikan(DB, limit: int = 40, only_airing: bool = False,
         except jikan.JikanError as e:
             errors += 1
             print(f"  ! {row['slug'][:40]}: {str(e)[:120]}")
+            # Mạng chết thì KHÔNG ngồi chờ 39 bộ × 3 lần thử (ca thật 02/11/2026:
+            # 856 giây cho một lần chạy vô ích). 5 bộ liên tiếp không kết nối
+            # được → dừng ngay và báo.
+            if "không kết nối được" in str(e):
+                net_errors_in_a_row += 1
+                if net_errors_in_a_row >= 5:
+                    raise RuntimeError(
+                        f"mạng không tới được api.jikan.moe ({net_errors_in_a_row} bộ "
+                        f"liên tiếp) — dừng sớm để không đốt thời gian. "
+                        f"Xem gợi ý chẩn đoán ở trên.") from e
+            else:
+                net_errors_in_a_row = 0
         except Exception as e:
             errors += 1
             print(f"  ! {row['slug'][:40]}: {type(e).__name__}: {str(e)[:120]}")
+            net_errors_in_a_row = 0
+        else:
+            net_errors_in_a_row = 0
 
     ok = errors == 0 or filled > 0
     DB.log_ingest("jikan", "episodes", ok, written,
@@ -656,6 +672,15 @@ def job_jikan(DB, limit: int = 40, only_airing: bool = False,
     print(f"  ✓ {filled} bộ được lấp · {written} tập · "
           f"{skipped} bộ đã đủ/đã có tập (bỏ qua)"
           + (f" · {errors} lỗi" if errors else ""))
+
+    # NỔ khi KHÔNG lấp được bộ nào mà vẫn có lỗi. Ca thật 02/11/2026: 39/39 bộ
+    # ConnectTimeout tới api.jikan.moe, job in 39 dòng lỗi rồi exit 0 → CI xanh,
+    # dữ liệu không đổi, không ai biết. Đúng loại "xanh mà việc thật không xảy ra".
+    if filled == 0 and errors > 0:
+        raise RuntimeError(
+            f"job F không lấp được bộ nào: {errors} bộ lỗi, 0 bộ thành công. "
+            f"Xem gợi ý mạng ở log phía trên."
+        )
     return written
 
 

@@ -133,6 +133,25 @@ Kèm 2 lỗi nữa cùng đợt:
 supabase functions deploy home search schedule anime push
 ```
 
+### Job F hỏng mạng: phải ĐỎ, và phải dừng sớm
+
+Đo 02/11/2026 trên máy Windows của chủ dự án: **39/39** bộ Jikan `ConnectTimeout`,
+job in 39 dòng lỗi rồi **exit 0** (mất 856 giây). Hai bản vá:
+
+1. **Nổ khi không lấp được bộ nào** (`filled == 0 and errors > 0`) → exit ≠ 0.
+2. **Cầu dao**: 5 bộ liên tiếp không kết nối được → dừng ngay, không chờ hết.
+3. `ingest/net.py`: khi request ĐẦU TIÊN lỗi kết nối, **ép IPv4** rồi thử lại —
+   nguyên nhân phổ biến nhất của ConnectTimeout hàng loạt trên Windows là máy ưu
+   tiên IPv6 nhưng đường ra IPv6 không thông.
+
+Chẩn đoán tay (Git Bash):
+
+```bash
+curl -4 -sS -m 20 -o /dev/null -w '%{http_code}\n' https://api.jikan.moe/v4/anime/30276/episodes
+```
+
+`200` → mạng ổn. `000` → ISP/proxy chặn: đặt `HTTPS_PROXY=http://host:port` trong `.env`.
+
 ### Cron: GitHub không đủ tin cậy
 
 Đo thật ngày 01/11/2026: workflow "active" nhưng `event=schedule` = **0 run/10h**.
