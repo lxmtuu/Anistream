@@ -173,6 +173,31 @@ curl -4 -sS -m 20 -o /dev/null -w '%{http_code}\n' https://api.jikan.moe/v4/anim
 
 `200` → mạng ổn. `000` → ISP/proxy chặn: đặt `HTTPS_PROXY=http://host:port` trong `.env`.
 
+### Chẩn đoán mạng: `bash scripts/check_net.sh`
+
+Khi một job cứ `ConnectTimeout` mà job khác vẫn chạy được (ca thật 02/11/2026:
+Jikan chết 39/39 nhưng TMDB vẫn lấy được 63/126 `tmdb_id`), đừng đoán. Script đo
+từng tầng rồi in kết luận:
+
+```
+── DNS ──
+  Jikan/MAL (job F)   ✓ 135.181.39.91
+── Kết nối HTTPS (IPv4 / IPv6) ──
+  Jikan/MAL (job F)   ❌ v4=000  v6=000 → KHÔNG kết nối được (firewall/ISP)
+  TMDB (job D)        ⚠ v4=401 (OK)  v6=000 → CHỈ IPv6 lỗi
+```
+
+Đọc kết quả:
+- **DNS trống** → DNS nhà mạng chặn: đổi sang `1.1.1.1` / `8.8.8.8`, hoặc
+  `nslookup api.jikan.moe 1.1.1.1` để xác nhận.
+- **`v4` OK, `v6` 000** → chỉ IPv6 hỏng: `ingest/net.py` tự ép IPv4, không cần làm gì.
+- **`v4` và `v6` đều 000** → firewall/ISP chặn host đó. Ba cách: thêm
+  `HTTPS_PROXY=http://host:port` vào `.env` · chạy job trên GitHub Actions ·
+  dùng nguồn khác cho job đó.
+
+Lưu ý: `401`, `404`, `4xx` đều là **đã tới được server** — script chỉ coi `000`
+là chặn. Vì vậy `curl` thiếu API key vẫn được tính là OK.
+
 ### Cron: GitHub không đủ tin cậy
 
 Đo thật ngày 01/11/2026: workflow "active" nhưng `event=schedule` = **0 run/10h**.

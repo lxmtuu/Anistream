@@ -202,6 +202,33 @@ select a.title_romaji, count(e.number) from anime a
 > Muốn job D chạy tự động hằng ngày: thêm `TMDB_API_KEY` vào GitHub secrets
 > (Settings → Secrets → Actions). Không có key thì job D tự bỏ qua kèm cảnh báo.
 
+### 02/11/2026 — Jikan không tới được từ máy bạn
+
+`api.jikan.moe` timeout (kể cả `curl -4`) trong khi TMDB vẫn hoạt động. Chẩn đoán
+bằng một lệnh, đừng đoán:
+
+```bash
+bash scripts/check_net.sh
+```
+
+Kết quả rơi vào 1 trong 3 nhóm (xem bảng trong `ingest/README.md` § Chẩn đoán
+mạng). Nếu host đó bị chặn thật thì **không phải lỗi code** — job F sẽ fail rõ
+ràng (exit ≠ 0) thay vì im lặng, và mọi job khác vẫn chạy.
+
+Thay thế nhanh khi Jikan bị chặn: **job D (TMDB) đã lấp được phần lớn tập** —
+đo 02/11: 19 bộ thiếu tập + 4 bộ 0 tập đều đã có `tmdb_id`:
+
+```bash
+python3 -m ingest.main tmdb --limit-tmdb 200
+python3 -m ingest.main tmdb --refresh --limit-tmdb 200
+```
+
+Hoặc chạy Jikan trên GitHub Actions (không qua mạng của bạn):
+
+```bash
+GH_TOKEN=xxx bash scripts/trigger_ingest.sh lxmtuu/Anistream jikan --fill-gaps
+```
+
 ### Vá 02/11/2026 — 4 lỗi "âm thầm" làm mất dữ liệu
 
 Rà lại toàn bộ pipeline, tìm được 4 chỗ ghi/sửa dữ liệu SAI mà không chỗ nào báo lỗi:
