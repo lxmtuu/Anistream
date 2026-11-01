@@ -29,6 +29,7 @@ export interface AnimeRow {
   popularity: number | null;
   genres: string[] | null;
   synopsis_vi: string | null;
+  synopsis_original?: string | null;
 }
 
 export interface EpisodeRow {
@@ -191,7 +192,9 @@ export function toAnimeDto(
     status: row.status,
     episodes_total: row.episodes_total,
     genres: row.genres ?? [],
-    synopsis: row.synopsis_vi ?? "",
+    // Ưu tiên bản dịch tiếng Việt; chưa có thì dùng mô tả gốc của AniList
+    // (trước đây luôn là "" nên trang chi tiết không có gì để đọc).
+    synopsis: row.synopsis_vi || row.synopsis_original || "",
     is_free: freeLinks.length > 0,
     platforms,
     episodes: eps,

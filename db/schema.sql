@@ -36,7 +36,8 @@ create table if not exists anime (
   title_english   text,
   title_native    text,
   title_vi        text,                                 -- từ TMDB vi-VN hoặc dịch tay
-  synopsis_vi     text,
+  synopsis_vi     text,                                 -- bản dịch tiếng Việt (TMDB/dịch tay)
+  synopsis_original text,                               -- mô tả gốc từ AniList (dự phòng khi chưa dịch)
 
   cover_url       text,
   banner_url      text,
