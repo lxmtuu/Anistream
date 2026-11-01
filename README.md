@@ -19,6 +19,7 @@
 | 5b | Auth + đồng bộ watchlist đa thiết bị (Supabase Auth) | ⏭ |
 | 6 | Desktop build + submit store | ⏭ |
 | 7 | CI `flutter analyze` + test cho app | ✅ |
+| 8 | Bản web trên GitHub Pages (xem app không cần cài Flutter) | ✅ code xong, ⏳ chờ bật Pages |
 
 > Rà soát toàn repo 01/11/2026: xem **`BAO_CAO_RA_SOAT.md`** (6 lỗi thật đã sửa,
 > 5 lỗi TypeScript/Python đã kiểm tra sạch, phần còn tồn đọng + lý do).
@@ -67,6 +68,23 @@ flutter run --dart-define=USE_MOCK=false \
   --dart-define=API_BASE=https://<ref>.supabase.co/functions/v1 \
   --dart-define=ANON_KEY=<anon key>
 ```
+
+## Xem app mà không cần cài Flutter
+
+Bản web của app (mock data — dữ liệu thật sinh từ AniList/YouTube, không cần Supabase)
+được build tự động bằng `.github/workflows/pages.yml` và deploy lên GitHub Pages.
+
+**Bật 1 lần** (~10 giây, chỉ chủ repo làm được):
+
+1. **Settings → Pages → Build and deployment → Source: `GitHub Actions`**
+   (repo đang để `Deploy from a branch` → workflow chỉ *build*, không deploy được)
+2. **Actions → pages → Re-run all jobs**
+
+Xong: mở `https://<user>.github.io/Anistream/` là thấy app chạy thật trên trình duyệt.
+Trang xem trước tĩnh vẫn còn ở `/previews/` (UI preview, bảng chọn mô hình, báo cáo nguồn).
+
+> Workflow tự kiểm tra chế độ Pages trước khi deploy: nếu còn `legacy` thì nó chỉ build
+> (để chứng minh code web biên dịch được) và ghi nhắc vào job summary — không báo đỏ.
 
 ## Dữ liệu đến từ đâu (và vì sao hợp pháp)
 

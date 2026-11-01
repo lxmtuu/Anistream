@@ -112,6 +112,21 @@ cũ dạng chuỗi, hydrate, ghi khi toggle, không ghi đè thao tác sớm).
 
 ---
 
+## 3b. Bổ sung sau rà soát: bản web trên GitHub Pages
+
+Đã thêm `.github/workflows/pages.yml` + `index.html` (trang vào) + splash trong
+`app/web/index.html`. Kết quả thật từ CI:
+
+| Run | Nội dung | Kết quả |
+|---|---|---|
+| `41300091926` | `flutter analyze` + `flutter test` | ✅ xanh (0 error, 6/6 test) |
+| `41300091985` | build web + deploy | build ✅ **`flutter build web` thành công** (bản web biên dịch được); deploy ❌ bị chặn vì branch này không được phép deploy |
+| `41300622859` | sau khi gate theo chế độ Pages | build ✅, deploy **skip có chủ ý** (`build_type=legacy`) |
+
+→ Cần bạn bấm **Settings → Pages → Source: GitHub Actions** rồi merge PR này vào `main`
+(deploy chỉ chạy từ `main`). Logic nhận diện đã kiểm chứng bằng chính API thật:
+`build_type=legacy → can_deploy=false`.
+
 ## 4. Thứ tự làm tiếp (đã cập nhật)
 
 ```
