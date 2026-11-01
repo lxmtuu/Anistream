@@ -1,0 +1,18 @@
+{
+  "_doc": "Map tay tên series (từ tiêu đề YouTube, thường là tiếng Trung) → AniList ID. Đây chính là phần 'biên tập' tạo giá trị riêng. Thêm dần mỗi khi log báo 'chưa khớp'.",
+  "aliases": {
+    "擅长捉弄人的高木同学": 99468,
+    "擅長捉弄人的高木同學": 99468,
+    "相反的你和我": 184951,
+    "相反的你和我 第二季": 210031,
+    "朱色假面": 195571,
+    "咒術迴戰": 113415,
+    "呪術廻戦": 113415,
+    "crayon shinchan": 966,
+    "crayon shin-chan": 966,
+    "shin - chan": 966,
+    "クレヨンしんちゃん": 966,
+    "Thu hồi cưỡng chế ma lực đã cho mượn bằng hình thức trả góp": 202250,
+    "Chuyện về Đại Thánh Nữ Chuyển Sinh Ẩn Danh": 187402
+  }
+}

@@ -1,0 +1,112 @@
+/**
+ * GET /functions/v1/search?q=frieren&genre=Action&year=2026&season=FALL&sort=popular&page=1&limit=24
+ *
+ * - `q` rỗng + không có filter → 400 (tránh query full table)
+ * - search mờ dùng index GIN trigram có sẵn trong db/schema.sql
+ * - cache 600s (kết quả tìm kiếm đổi rất chậm)
+ */
+import { fail, ok, withGuard } from "../_shared/respond.ts";
+import { adminClient } from "../_shared/supabase.ts";
+import {
+  AnimeRow,
+  EpisodeRow,
+  groupByAnime,
+  LinkRow,
+  toAnimeDto,
+} from "../_shared/assemble.ts";
+import { ilikeSafe, resolveSort, toInt } from "../_shared/query.ts";
+
+Deno.serve(
+  withGuard(async (req: Request) => {
+    const url = new URL(req.url);
+    const q = (url.searchParams.get("q") ?? "").trim();
+    const genre = url.searchParams.get("genre");
+    const year = url.searchParams.get("year");
+    const season = url.searchParams.get("season");
+    const sort = resolveSort(url.searchParams.get("sort"));
+    const page = toInt(url.searchParams.get("page"), 1, 1, 50);
+    const limit = toInt(url.searchParams.get("limit"), 24, 1, 48);
+
+    if (!q && !genre && !year && !season) {
+      return fail("bad_request", "Cần ít nhất 1 tham số: q, genre, year hoặc season");
+    }
+    if (q.length > 60) {
+      return fail("bad_request", "q quá dài (tối đa 60 ký tự)");
+    }
+
+    const sb = adminClient();
+    const from = (page - 1) * limit;
+
+    let query = sb
+      .from("anime")
+      .select(
+        "id, slug, title_romaji, title_english, title_vi, title_native, cover_url, " +
+          "banner_url, year, season, status, format, episodes_total, score, " +
+          "popularity, genres, synopsis_vi",
+        { count: "exact" },
+      )
+      .eq("is_published", true);
+
+    if (q) {
+      const like = `%${ilikeSafe(q)}%`;
+      query = query.or(
+        [
+          `title_romaji.ilike.${like}`,
+          `title_english.ilike.${like}`,
+          `title_vi.ilike.${like}`,
+          `title_native.ilike.${like}`,
+        ].join(","),
+      );
+    }
+    if (genre) query = query.contains("genres", [genre]);
+    if (year) query = query.eq("year", toInt(year, 0, 1950, 2100));
+    if (season) query = query.eq("season", season.toUpperCase());
+
+    const { data, error, count } = await query
+      .order(sort.column, { ascending: sort.ascending, nullsFirst: false })
+      .range(from, from + limit - 1);
+
+    if (error) throw new Error(error.message);
+
+    const rows = (data ?? []) as unknown as AnimeRow[];
+    const ids = rows.map((r) => r.id);
+
+    let epsByAnime = new Map<number, EpisodeRow[]>();
+    let linksByAnime = new Map<number, LinkRow[]>();
+
+    if (ids.length > 0) {
+      const [epRes, linkRes] = await Promise.all([
+        sb
+          .from("episodes")
+          .select("anime_id, number, title, airing_at")
+          .in("anime_id", ids)
+          .order("number", { ascending: true })
+          .limit(600),
+        sb
+          .from("streaming_links")
+          .select("anime_id, episode_number, platform, region, url, kind, is_verified")
+          .in("anime_id", ids)
+          .eq("is_verified", true)
+          .limit(600),
+      ]);
+      epsByAnime = groupByAnime((epRes.data ?? []) as EpisodeRow[]);
+      linksByAnime = groupByAnime((linkRes.data ?? []) as LinkRow[]);
+    }
+
+    const items = rows.map((r) =>
+      toAnimeDto(r, epsByAnime.get(r.id) ?? [], linksByAnime.get(r.id) ?? []),
+    );
+
+    return ok(
+      {
+        items,
+        page,
+        limit,
+        total: count ?? items.length,
+        has_more: (count ?? 0) > from + items.length,
+      },
+      { ttl: 600, query: q },
+      { maxAge: 600, browserMaxAge: 120 },
+    );
+  }),
+);

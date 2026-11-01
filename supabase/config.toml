@@ -1,0 +1,31 @@
+# Supabase CLI config — chỉ khai báo phần Edge Functions.
+# Chạy local:  supabase start && supabase functions serve --env-file ./supabase/.env
+# Deploy:      supabase functions deploy home search schedule anime
+
+project_id = "anistream"
+
+# Catalog là dữ liệu CÔNG KHAI → không cần JWT.
+# (Nếu để mặc định true, client phải gửi Authorization: Bearer <anon key> — app có gửi,
+#  nhưng tắt đi thì curl/test dễ hơn và không lộ gì vì đây chỉ là dữ liệu đọc.)
+[functions.home]
+verify_jwt = false
+
+[functions.search]
+verify_jwt = false
+
+[functions.schedule]
+verify_jwt = false
+
+[functions.anime]
+verify_jwt = false
+
+# Nếu sau này thêm function ghi dữ liệu người dùng (watchlist, progress, push):
+#   [functions.me]
+#   verify_jwt = true     ← bắt buộc
+
+# Cron push "tập mới vừa ra" — gọi bằng service secret (x-cron-secret),
+# KHÔNG dùng JWT người dùng.
+#   supabase secrets set PUSH_CRON_SECRET="$(openssl rand -hex 24)"
+#   supabase secrets set FCM_SERVICE_ACCOUNT="$(cat service-account.json)"
+[functions.push]
+verify_jwt = false

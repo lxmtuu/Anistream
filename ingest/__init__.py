@@ -1,0 +1,1 @@
+"""AniStream ingest worker."""

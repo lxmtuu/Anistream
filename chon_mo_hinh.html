@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bảng chọn mô hình — AniStream</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#141926; --panel2:#1b2131; --line:#252d40;
+    --tx:#e8ecf4; --mut:#8b94a8; --acc:#7c5cff; --acc2:#3ddc97;
+    --warn:#ffb84d; --bad:#ff6b6b; --gold:#ffd166;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#1b1a3a 0%,var(--bg) 55%);
+       color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+       -webkit-font-smoothing:antialiased;padding-bottom:60px}
+  header{padding:26px 26px 12px;max-width:1320px;margin:0 auto}
+  h1{margin:0 0 6px;font-size:23px;letter-spacing:-.02em}
+  .sub{color:var(--mut);font-size:13.5px;line-height:1.6;max-width:820px}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+  .preset{background:var(--panel);border:1px solid var(--line);color:var(--tx);
+          padding:8px 13px;border-radius:9px;font-size:12.5px;cursor:pointer;
+          transition:.15s;font-family:inherit}
+  .preset:hover{border-color:var(--acc);background:#1d2340}
+  .preset.on{background:linear-gradient(135deg,#7c5cff,#5b3ff0);border-color:transparent;
+             box-shadow:0 4px 16px rgba(124,92,255,.35)}
+  .wrap{max-width:1320px;margin:0 auto;padding:16px 26px;display:grid;
+        grid-template-columns:288px 1fr;gap:22px;align-items:start}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+
+  /* sliders */
+  aside{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+        padding:16px;position:sticky;top:16px}
+  aside h2{margin:0 0 4px;font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:#aab3c7}
+  aside .hint{font-size:11.5px;color:var(--mut);margin-bottom:14px;line-height:1.5}
+  .crit{margin-bottom:13px}
+  .crit .row{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;margin-bottom:5px}
+  .crit .val{color:var(--acc);font-variant-numeric:tabular-nums;font-weight:700;font-size:12px}
+  input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:4px;
+    background:linear-gradient(90deg,var(--acc) 0%,var(--acc) var(--p,50%),#2a3245 var(--p,50%),#2a3245 100%);
+    output:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;
+    border-radius:50%;background:#fff;border:3px solid var(--acc);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:#fff;
+    border:3px solid var(--acc);cursor:pointer}
+  .reset{margin-top:6px;width:100%;background:transparent;border:1px dashed var(--line);
+         color:var(--mut);padding:8px;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit}
+  .reset:hover{color:var(--tx);border-color:var(--acc)}
+
+  /* banner */
+  .banner{background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(61,220,151,.10));
+    border:1px solid #36306b;border-radius:14px;padding:15px 17px;margin-bottom:18px}
+  .banner .lab{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#9d8bff;font-weight:700}
+  .banner .big{font-size:18px;font-weight:800;margin:5px 0 3px}
+  .banner .why{font-size:12.5px;color:#b9c2d6;line-height:1.55}
+
+  /* cards */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+        padding:15px 16px;margin-bottom:11px;transition:.18s}
+  .card:hover{border-color:#3a4460}
+  .card.top{border-color:#5b4bd6;box-shadow:0 0 0 1px rgba(124,92,255,.25),0 10px 30px -18px #7c5cff}
+  .chead{display:flex;gap:12px;align-items:flex-start}
+  .rank{flex:0 0 auto;width:36px;height:36px;border-radius:10px;background:var(--panel2);
+        display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:var(--mut)}
+  .rank.g1{background:linear-gradient(135deg,#ffd166,#f0a500);color:#231a00}
+  .rank.g2{background:linear-gradient(135deg,#cfd6e4,#9aa4b8);color:#1a1f2a}
+  .rank.g3{background:linear-gradient(135deg,#d59c6a,#a86f3f);color:#2a1707}
+  .cname{font-size:15px;font-weight:700;letter-spacing:-.01em}
+  .csub{font-size:12px;color:var(--mut);margin-top:2px}
+  .score{margin-left:auto;text-align:right;flex:0 0 auto}
+  .score b{font-size:22px;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+  .score span{font-size:11px;color:var(--mut);display:block}
+  .bar{height:6px;background:#20273a;border-radius:6px;overflow:hidden;margin:11px 0 10px}
+  .bar i{display:block;height:100%;border-radius:6px;
+         background:linear-gradient(90deg,#7c5cff,#3ddc97);transition:width .35s ease}
+  .tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:2px}
+  .tag{font-size:10.5px;padding:3px 8px;border-radius:20px;background:#1d2435;
+       color:#a9b3c8;border:1px solid #2b3448}
+  .tag.ok{color:#7dffc4;background:rgba(61,220,151,.1);border-color:rgba(61,220,151,.28)}
+  .tag.no{color:#ff9b9b;background:rgba(255,107,107,.1);border-color:rgba(255,107,107,.28)}
+  .tag.mid{color:#ffcf8a;background:rgba(255,184,77,.1);border-color:rgba(255,184,77,.28)}
+  .actions{display:flex;gap:8px;margin-top:12px}
+  .btn{font-family:inherit;font-size:12.5px;padding:8px 13px;border-radius:9px;cursor:pointer;
+       border:1px solid var(--line);background:var(--panel2);color:var(--tx);transition:.15s}
+  .btn:hover{border-color:var(--acc)}
+  .btn.primary{background:linear-gradient(135deg,#7c5cff,#5b3ff0);border-color:transparent;
+                font-weight:700;box-shadow:0 4px 14px rgba(124,92,255,.3)}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .detail{display:none;margin-top:13px;padding-top:13px;border-top:1px dashed var(--line);
+          font-size:12.5px;line-height:1.62;color:#b9c2d6}
+  .detail.open{display:block}
+  .detail .k{color:#8f9bb3;font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+             margin:9px 0 3px;font-weight:700}
+  .detail ul{margin:0;padding-left:17px}
+  .detail li{margin:2px 0}
+
+  /* compare table */
+  .cmp{margin-top:26px;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .cmp h3{margin:0;padding:14px 16px;font-size:13px;text-transform:uppercase;
+          letter-spacing:.08em;color:#aab3c7;border-bottom:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid #1e2536}
+  th{color:#8f9bb3;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+  td.num{text-align:center;font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:none}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(5,7,12,.76);backdrop-filter:blur(6px);
+           display:none;align-items:center;justify-content:center;padding:20px;z-index:50}
+  .overlay.open{display:flex}
+  .modal{background:var(--panel);border:1px solid #3a4460;border-radius:16px;max-width:600px;
+         width:100%;max-height:86vh;overflow:auto;padding:22px}
+  .modal h2{margin:0 0 4px;font-size:19px}
+  .modal .msub{color:var(--mut);font-size:12.5px;margin-bottom:16px}
+  .modal .sec{margin-top:15px}
+  .modal .sec b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;
+                color:#9d8bff;margin-bottom:5px}
+  .modal .sec p,.modal .sec li{font-size:12.8px;line-height:1.6;color:#c6cee0;margin:0}
+  .modal ol{margin:0;padding-left:18px}
+  .modal .close{float:right;background:transparent;border:none;color:var(--mut);
+                font-size:20px;cursor:pointer;line-height:1}
+  footer{max-width:1320px;margin:26px auto 0;padding:0 26px;color:#5d6577;font-size:11.5px;line-height:1.7}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🧭 Bảng chọn mô hình — AniStream</h1>
+  <div class="sub">
+    Chỉnh <b>trọng số</b> theo ưu tiên của bạn ở cột bên trái — bảng xếp hạng tự tính lại ngay.
+    Điểm tối đa = 5 × tổng trọng số. Ràng buộc đang áp dụng: <b>Flutter (mobile + desktop)</b> ·
+    <b>hạ tầng 0đ</b> · <b>muốn xem anime đầy đủ, miễn phí</b>.
+  </div>
+  <div class="presets" id="presets"></div>
+</header>
+
+<div class="wrap">
+  <aside>
+    <h2>Trọng số tiêu chí</h2>
+    <div class="hint">0 = không quan tâm · 4 = quan trọng nhất. Kéo để xem lựa chọn nào lên đầu.</div>
+    <div id="crits"></div>
+    <button class="reset" id="reset">↺ Về mặc định (startup 0đ)</button>
+  </aside>
+
+  <section>
+    <div class="banner" id="banner"></div>
+    <div id="cards"></div>
+
+    <div class="cmp">
+      <h3>So sánh chi tiết từng tiêu chí</h3>
+      <div style="overflow:auto">
+        <table id="cmpTable"></table>
+      </div>
+    </div>
+
+    <div class="cmp" style="margin-top:20px">
+      <h3>Điều kiện bắt buộc (không thương lượng)</h3>
+      <div style="padding:14px 16px;font-size:12.8px;line-height:1.75;color:#b9c2d6">
+        ❌ <b>Không stream/phát tán nội dung bản quyền không có phép.</b> Không phải vì đạo đức suông —
+        vì nó phá huỷ khả năng tồn tại: App Store 5.2.3 từ chối, Google Play đình chỉ tài khoản dev,
+        Cloudflare/Supabase ban theo DMCA, và tại VN có thể bị xử lý theo NĐ 131/2013, nặng hơn là Điều 225 BLHS.<br>
+        ✅ Nếu cần <b>video phát trong app</b> với <b>0đ</b>: chỉ có 2 đường hợp pháp —
+        <b>nhúng player chính thức của YouTube</b> (dùng IFrame API, không trích xuất stream, không chặn ads)
+        hoặc <b>phát file do chính người dùng cung cấp</b> (WebDAV/Drive/SMB — vị thế pháp lý như VLC).
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal" id="modal"></div>
+</div>
+
+<footer>
+  Bảng chọn này chạy offline, không gọi mạng. Mọi số liệu doanh thu là ước lượng tham khảo cho thị trường VN.
+  Tài liệu chi tiết: <code>CHON_MO_HINH.md</code> · <code>LO_TRINH_ANIME_APP.md</code> · <code>anime_sources.md</code>
+</footer>
+
+<script>
+/* ─────────────── Dữ liệu ─────────────── */
+const CRITERIA = [
+  {id:'legal',  name:'Hợp pháp',                w:3},
+  {id:'cost',   name:'Chi phí 0đ bền vững',     w:3},
+  {id:'watch',  name:'Xem được trong app',      w:3},
+  {id:'money',  name:'Doanh thu khả thi',       w:2},
+  {id:'moat',   name:'Hào cạnh tranh',          w:2},
+  {id:'cold',   name:'Dễ cold-start ở VN',      w:2},
+  {id:'speed',  name:'Thời gian ra MVP',        w:1},
+  {id:'risk',   name:'An toàn store/policy',    w:2},
+];
+
+const PRESETS = {
+  startup: {label:'🏁 Startup 0đ (khuyến nghị)', w:{legal:3,cost:3,watch:3,money:2,moat:2,cold:2,speed:1,risk:2}},
+  portfolio:{label:'🎓 Portfolio / đồ án',        w:{legal:3,cost:3,watch:1,money:1,moat:1,cold:2,speed:4,risk:3}},
+  money:   {label:'💰 Ưu tiên doanh thu',         w:{legal:3,cost:3,watch:2,money:4,moat:3,cold:2,speed:1,risk:2}},
+  quick:   {label:'⚡ Nhanh ra mắt nhất',          w:{legal:3,cost:3,watch:2,money:1,moat:1,cold:4,speed:4,risk:3}},
+  watch:   {label:'▶️ Phải xem được trong app',    w:{legal:3,cost:3,watch:5,money:2,moat:2,cold:2,speed:1,risk:2}},
+};
+
+const OPTIONS = [
+  {
+    id:'C', name:'🅒 Free Legal Streaming', sub:'“Netflix anime miễn phí, hợp pháp” — nhúng YouTube official + public domain',
+    s:{legal:4,cost:5,watch:5,money:3,moat:3,cold:4,speed:3,risk:3},
+    tags:[['ok','Xem được trong app'],['ok','0đ băng thông'],['mid','Catalog phụ thuộc bên thứ ba']],
+    detail:{
+      'Là gì':'Catalog anime phát ngay trong app từ video đã được chủ kênh đăng công khai (Muse VN, Ani-One, publisher), nhúng bằng IFrame Player API chính thức + anime public domain.',
+      'Ưu điểm':['Bấm ▶ là video phát ngay — khác biệt rõ so với LiveChart/AniList','Không host 1 byte video → 0đ băng thông vĩnh viễn','Không có rủi ro bản quyền nếu dùng đúng player chính thức','Thông điệp bán được ở VN: “anime free, không quảng cáo casino”','Có sẵn hào: danh mục tuyển chọn thủ công + vietsub'],
+      'Nhược điểm / rủi ro':['Catalog mỏng hơn site lậu','Một số video tắt embed → phải kiểm tra định kỳ, có job link-health','Doanh thu ads thấp (ads thuộc về YouTube)','Apple/Google soi kỹ: phải có trang Legal/Content Policy rõ ràng'],
+      'Doanh thu':'Premium (đồng bộ, không ads của bạn, theme, thống kê) + affiliate + donation',
+      'MVP':'6–8 tuần'
+    },
+    plan:['Tuần 1: Supabase + chạy db/schema.sql + ingest AniList/Kitsu/TMDB (anime ≥ 3.000 bộ)',
+          'Tuần 2: Tuyển chọn 300–800 tập free official, lưu streaming_links(kind=free_legal), tự kiểm tra embeddable',
+          'Tuần 3: Edge Functions /home /anime /search /schedule',
+          'Tuần 4–5: Flutter Home/Detail/Search/Schedule/Player IFrame + Drift offline',
+          'Tuần 6: Auth + watchlist + push FCM tập mới',
+          'Tuần 7: Trang Legal/Content Policy + nguồn video',
+          'Tuần 8–10: Desktop build, QA, Sentry, submit store, beta 100 người']
+  },
+  {
+    id:'D', name:'🅓 Self-host Media Client', sub:'Trình phát cho thư viện anime CỦA BẠN (WebDAV/Drive/SMB/Jellyfin)',
+    s:{legal:5,cost:5,watch:5,money:5,moat:4,cold:3,speed:2,risk:3},
+    tags:[['ok','0đ vĩnh viễn'],['ok','Bán được tiền (IAP)'],['mid','Khó marketing']],
+    detail:{
+      'Là gì':'App kết nối file/thư mục của chính người dùng (WebDAV, Google Drive, OneDrive, SMB, Emby/Jellyfin). App lo metadata từ AniList, phụ đề ASS/SRT, resume, đồng bộ điện thoại ↔ máy tính. Vị thế pháp lý như VLC / Infuse.',
+      'Ưu điểm':['Doanh thu cao nhất trong 5 lựa chọn — IAP một lần $4.99–9.99 hoặc $1.99/tháng (Infuse đã chứng minh)','Không host video → 0đ hạ tầng thật sự','Hào kỹ thuật thật: decode, phụ đề ASS, đồng bộ vị trí, mạng nội bộ','Đúng mục tiêu “xem đầy đủ” của người dùng mà bạn không vi phạm gì','Có thể bán cho thị trường nước ngoài (review tiếng Anh)'],
+      'Nhược điểm / rủi ro':['Cold-start khó: phải giải thích “app để xem file của bạn”','Apple soi app dạng này kỹ — tuyệt đối không nhúng nguồn phim sẵn','Cần subtitle engine tốt (60% giá trị nằm ở phụ đề)','MVP lâu hơn (8–10 tuần)'],
+      'Doanh thu':'IAP / subscription (paywall đồng bộ đa thiết bị, phụ đề nâng cao, theme)',
+      'MVP':'8–10 tuần'
+    },
+    plan:['Tuần 1–2: Metadata engine (AniList match tên file → anime, fuzzy + season/ep) + Supabase',
+          'Tuần 3: Connector WebDAV + SMB + Google Drive (OAuth)',
+          'Tuần 4–5: Player mobile (video_player) + desktop (media_kit) + phụ đề ASS/SRT',
+          'Tuần 6: Resume + đồng bộ vị trí + “Continue watching”',
+          'Tuần 7: Flutter desktop (Windows/macOS) + responsive',
+          'Tuần 8: Paywall IAP + RevenueCat',
+          'Tuần 9–10: QA, submit store, launch trên GitHub Releases + Product Hunt']
+  },
+  {
+    id:'A', name:'🅐 Discovery + Deep-link', sub:'“LiveChart tiếng Việt” — lịch phát + dẫn sang nền tảng hợp pháp',
+    s:{legal:5,cost:5,watch:1,money:1,moat:1,cold:4,speed:5,risk:5},
+    tags:[['ok','An toàn nhất'],['ok','Ra MVP nhanh nhất'],['no','Không xem trong app']],
+    detail:{
+      'Là gì':'Catalog đầy đủ + lịch phát tới giờ + push “tập mới”. Bấm Xem → mở Netflix/Crunchyroll/Bilibili/FPT Play.',
+      'Ưu điểm':['Rủi ro pháp lý gần bằng 0','MVP 4–6 tuần, ít kỹ thuật khó','Dễ SEO + dễ được group anime VN chia sẻ','Tái dùng 100% schema + ingest đã có'],
+      'Nhược điểm / rủi ro':['Người dùng bị “đá” sang app khác → D30 thường < 10%','Không có hào: AniList/LiveChart/MAL đã có, miễn phí','Gần như không kiếm được tiền (ads VN rất thấp)','Sai thị trường: nhắm nhóm đã trả tiền cho nền tảng hợp pháp — nhóm nhỏ nhất ở VN'],
+      'Doanh thu':'Ads + affiliate (rất thấp)',
+      'MVP':'4–6 tuần'
+    },
+    plan:['Tuần 1: ingest + schema (đã có sẵn)','Tuần 2: Edge Functions','Tuần 3–4: Flutter Home/Detail/Search/Schedule',
+          'Tuần 5: Push tập mới + deep link','Tuần 6: Desktop build + submit store']
+  },
+  {
+    id:'E', name:'🅔 Indie Studio Platform', sub:'“Vimeo cho anime Việt” — creator tự đăng, bạn có license văn bản',
+    s:{legal:5,cost:1,watch:4,money:4,moat:5,cold:2,speed:1,risk:4},
+    tags:[['ok','Hào mạnh nhất'],['no','Phá budget 0đ'],['mid','Cần quan hệ creator']],
+    detail:{
+      'Là gì':'Nền tảng cho animator Việt đăng tác phẩm; bạn ký license bằng văn bản → thật sự sở hữu quyền phát. Doanh thu chia sẻ với creator.',
+      'Ưu điểm':['Hào mạnh nhất: bạn sở hữu nội dung độc quyền','Scale cao nhất, câu chuyện gọi vốn tốt','Có ý nghĩa với cộng đồng animator VN'],
+      'Nhược điểm / rủi ro':['Băng thông phá budget 0đ: 1.000 giờ xem 1080p ≈ $25/tháng, tăng tuyến tính','Cold-start hai đầu (creator ↔ viewer)','Cần hợp đồng, pháp lý nội dung, kiểm duyệt','Không phải v1'],
+      'Doanh thu':'Subscription + tip + revenue share',
+      'MVP':'12+ tuần (và cần vốn)'
+    },
+    plan:['Không nên làm v1 với 0đ. Để dành cho giai đoạn sau, khi đã có app + user từ 🅒/🅓 và có vốn cho CDN.']
+  },
+  {
+    id:'B', name:'🅑 Tracker + Social', sub:'“Letterboxd của anime Việt” — watchlist, review, list, feed bạn bè',
+    s:{legal:5,cost:5,watch:1,money:2,moat:4,cold:1,speed:3,risk:5},
+    tags:[['ok','Hào xã hội mạnh nếu sống'],['no','Cold-start cực khó']],
+    detail:{
+      'Là gì':'Người dùng theo dõi tiến độ, chấm điểm, viết review, tạo list, xem feed bạn bè, share card đẹp.',
+      'Ưu điểm':['Hào dữ liệu + xã hội mạnh nếu vượt qua cold-start','Chi phí gần 0, không rủi ro bản quyền','Premium dễ bán (thống kê nâng cao, theme, không ads)'],
+      'Nhược điểm / rủi ro':['Chicken-and-egg: mạng xã hội cần user, user cần mạng xã hội → 90% app social chết','Cạnh tranh trực tiếp AniList/MyAnimeList (đã 10 năm)','Không xem được video → khó tạo thói quen mở app hằng ngày'],
+      'Doanh thu':'Premium + ads',
+      'MVP':'6–8 tuần'
+    },
+    plan:['Chỉ chọn nếu bạn đã có audience sẵn (TikTok/Facebook anime > 50k follow). Nếu không, hãy làm 🅒 trước rồi thêm lớp social sau.']
+  },
+];
+
+/* ─────────────── Trạng thái ─────────────── */
+let weights = Object.fromEntries(CRITERIA.map(c => [c.id, c.w]));
+
+/* ─────────────── Render sliders ─────────────── */
+const critsEl = document.getElementById('crits');
+function buildSliders(){
+  critsEl.innerHTML = '';
+  CRITERIA.forEach(c => {
+    const d = document.createElement('div');
+    d.className = 'crit';
+    d.innerHTML = `
+      <div class="row"><span>${c.name}</span><span class="val" id="v-${c.id}">${weights[c.id]}</span></div>
+      <input type="range" min="0" max="4" step="1" value="${weights[c.id]}" id="s-${c.id}"
+             style="--p:${weights[c.id]/4*100}%">`;
+    critsEl.appendChild(d);
+    d.querySelector('input').addEventListener('input', e => {
+      weights[c.id] = +e.target.value;
+      e.target.style.setProperty('--p', weights[c.id]/4*100 + '%');
+      document.getElementById('v-'+c.id).textContent = weights[c.id];
+      document.querySelectorAll('.preset').forEach(p=>p.classList.remove('on'));
+      render();
+    });
+  });
+}
+
+/* ─────────────── Presets ─────────────── */
+const presetsEl = document.getElementById('presets');
+Object.entries(PRESETS).forEach(([k,p],i) => {
+  const b = document.createElement('button');
+  b.className = 'preset' + (k==='startup' ? ' on' : '');
+  b.textContent = p.label;
+  b.onclick = () => {
+    weights = {...p.w};
+    document.querySelectorAll('.preset').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    buildSliders(); render();
+  };
+  presetsEl.appendChild(b);
+});
+document.getElementById('reset').onclick = () => {
+  weights = {...PRESETS.startup.w};
+  document.querySelectorAll('.preset').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.preset')[0].classList.add('on');
+  buildSliders(); render();
+};
+
+/* ─────────────── Tính điểm ─────────────── */
+const W = id => OPTIONS.map(o => o.s[id]);
+const TOTAL_W = () => CRITERIA.reduce((a,c)=>a+weights[c.id],0);
+
+function scoreOf(o){
+  return CRITERIA.reduce((a,c)=>a + o.s[c.id]*weights[c.id], 0);
+}
+function norm(o){                       // 0–100 để vẽ bar
+  const tw = TOTAL_W();
+  return tw ? Math.round(scoreOf(o)/(5*tw)*100) : 0;
+}
+
+/* ─────────────── Render ─────────────── */
+const cardsEl = document.getElementById('cards');
+const bannerEl = document.getElementById('banner');
+
+function render(){
+  const ranked = [...OPTIONS].sort((a,b)=>scoreOf(b)-scoreOf(a));
+  const tw = TOTAL_W();
+  const best = ranked[0];
+  const second = ranked[1];
+
+  bannerEl.innerHTML = `
+    <div class="lab">Lựa chọn dẫn đầu theo trọng số của bạn</div>
+    <div class="big">${best.name} — ${scoreOf(best)}/${5*tw} điểm</div>
+    <div class="why">${best.detail['Là gì']}
+      ${scoreOf(best)-scoreOf(second) <= 6
+        ? `<br><b style="color:#ffcf8a">Sát nút với ${second.name} (${scoreOf(second)}đ)</b> — hai hướng gần như tương đương với ưu tiên hiện tại; hãy chọn theo việc bạn thích làm hơn.`
+        : `<br>Bỏ xa lựa chọn thứ 2 (${second.name}, ${scoreOf(second)}đ).`}</div>`;
+
+  cardsEl.innerHTML = '';
+  ranked.forEach((o, i) => {
+    const pct = norm(o);
+    const card = document.createElement('div');
+    card.className = 'card' + (i===0 ? ' top' : '');
+    card.innerHTML = `
+      <div class="chead">
+        <div class="rank ${i<3?'g'+(i+1):''}">${i+1}</div>
+        <div>
+          <div class="cname">${o.name}</div>
+          <div class="csub">${o.sub}</div>
+        </div>
+        <div class="score"><b>${scoreOf(o)}</b><span>/${5*tw}</span></div>
+      </div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="tags">${o.tags.map(([t,txt])=>`<span class="tag ${t}">${txt}</span>`).join('')}</div>
+      <div class="actions">
+        <button class="btn primary" data-pick="${o.id}">✓ Chốt lựa chọn này</button>
+        <button class="btn" data-detail="${o.id}">Xem chi tiết</button>
+      </div>
+      <div class="detail" id="det-${o.id}">
+        <div class="k">Là gì</div><div>${o.detail['Là gì']}</div>
+        <div class="k">Ưu điểm</div><ul>${o.detail['Ưu điểm'].map(x=>`<li>${x}</li>`).join('')}</ul>
+        <div class="k">Nhược điểm / rủi ro</div><ul>${o.detail['Nhược điểm / rủi ro'].map(x=>`<li>${x}</li>`).join('')}</ul>
+        <div class="k">Doanh thu</div><div>${o.detail['Doanh thu']}</div>
+        <div class="k">Thời gian ra MVP</div><div>${o.detail['MVP']}</div>
+        <div class="k">Điểm thành phần (theo trọng số hiện tại)</div>
+        <div>${CRITERIA.map(c=>`${c.name}: <b>${o.s[c.id]}</b>/5 ×${weights[c.id]}`).join(' · ')}</div>
+      </div>`;
+    cardsEl.appendChild(card);
+  });
+
+  cardsEl.querySelectorAll('[data-detail]').forEach(b => {
+    b.onclick = () => {
+      const el = document.getElementById('det-' + b.dataset.detail);
+      el.classList.toggle('open');
+      b.textContent = el.classList.contains('open') ? 'Thu gọn' : 'Xem chi tiết';
+    };
+  });
+  cardsEl.querySelectorAll('[data-pick]').forEach(b => {
+    b.onclick = () => openModal(OPTIONS.find(o => o.id === b.dataset.pick));
+  });
+
+  renderTable(ranked);
+}
+
+function renderTable(ranked){
+  const head = `<tr><th>Tiêu chí</th><th style="text-align:center">Trọng số</th>
+    ${ranked.map(o=>`<th style="text-align:center">${o.id}</th>`).join('')}</tr>`;
+  const rows = CRITERIA.map(c => `<tr>
+      <td>${c.name}</td>
+      <td class="num" style="color:var(--acc);font-weight:700">${weights[c.id]}</td>
+      ${ranked.map(o=>{
+        const v = o.s[c.id];
+        const col = v>=4 ? 'var(--acc2)' : v>=3 ? '#9cc6ff' : v>=2 ? 'var(--warn)' : 'var(--bad)';
+        return `<td class="num"><span class="dot" style="background:${col}"></span>${v}</td>`;
+      }).join('')}
+    </tr>`).join('');
+  const foot = `<tr style="background:#171d2b">
+      <td><b>TỔNG</b></td>
+      <td class="num">${TOTAL_W()}</td>
+      ${ranked.map(o=>`<td class="num"><b style="font-size:14px">${scoreOf(o)}</b>
+        <span style="color:var(--mut);font-size:11px"> /${5*TOTAL_W()}</span></td>`).join('')}
+    </tr>`;
+  document.getElementById('cmpTable').innerHTML = head + rows + foot;
+}
+
+/* ─────────────── Modal chốt ─────────────── */
+const overlay = document.getElementById('overlay');
+const modal = document.getElementById('modal');
+overlay.onclick = e => { if (e.target === overlay) overlay.classList.remove('open'); };
+
+function openModal(o){
+  const tw = TOTAL_W();
+  modal.innerHTML = `
+    <button class="close" onclick="document.getElementById('overlay').classList.remove('open')">✕</button>
+    <h2>Đã chốt: ${o.name}</h2>
+    <div class="msub">${o.sub} · ${scoreOf(o)}/${5*tw} điểm theo trọng số hiện tại · MVP ${o.detail['MVP']}</div>
+
+    <div class="sec"><b>Kế hoạch triển khai</b>
+      <ol>${o.plan.map(p=>`<li>${p}</li>`).join('')}</ol>
+    </div>
+    <div class="sec"><b>Doanh thu</b><p>${o.detail['Doanh thu']}</p></div>
+    <div class="sec"><b>Việc cần làm ngay hôm nay</b>
+      <ol>
+        <li>Chụp lại phần này (Ctrl/Cmd + P) và lưu vào ghi chú dự án.</li>
+        <li>Chuyển lựa chọn này thành tài liệu: cập nhật <code>LO_TRINH_ANIME_APP.md</code> theo mục ${o.id}.</li>
+        <li>Chốt phạm vi v1 (chỉ 3 màn hình đầu) rồi <b>đóng băng</b> phạm vi 2 tuần — không đổi giữa đường.</li>
+        <li>Nhắn cho mình: “Làm theo ${o.id}” để mình viết code bước đầu.</li>
+      </ol>
+    </div>
+    <div class="sec"><b>Nhắc lại điều kiện bắt buộc</b>
+      <p>Không host/stream nội dung bản quyền không có phép. Video chỉ từ player chính thức của YouTube hoặc file do chính người dùng cung cấp.</p>
+    </div>
+    <div class="actions" style="margin-top:18px">
+      <button class="btn primary" onclick="window.print()">🖨 In / lưu PDF</button>
+      <button class="btn" onclick="document.getElementById('overlay').classList.remove('open')">Đóng</button>
+    </div>`;
+  overlay.classList.add('open');
+}
+
+/* ─────────────── Khởi động ─────────────── */
+buildSliders();
+render();
+</script>
+</body>
+</html>

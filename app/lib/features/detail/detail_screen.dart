@@ -1,0 +1,368 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../app/theme.dart';
+import '../../core/models/anime.dart';
+import '../../core/widgets/net_image.dart';
+import '../../data/anime_repository.dart';
+
+class DetailScreen extends ConsumerWidget {
+  final String slug;
+  const DetailScreen({super.key, required this.slug});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final feed = ref.watch(homeFeedProvider);
+    return Scaffold(
+      body: feed.when(
+        loading: () => const Center(
+          child: CircularProgressIndicator(color: AppTheme.accent),
+        ),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text('Lỗi: $e',
+                style: const TextStyle(color: AppTheme.muted, fontSize: 12)),
+          ),
+        ),
+        data: (data) {
+          final anime = data.bySlug(slug);
+          if (anime == null) {
+            return const Center(child: Text('Không tìm thấy anime này'));
+          }
+          return _DetailBody(anime: anime);
+        },
+      ),
+    );
+  }
+}
+
+class _DetailBody extends ConsumerWidget {
+  final Anime anime;
+  const _DetailBody({required this.anime});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final inList = ref.watch(watchlistProvider).contains(anime.id);
+    final ep = anime.firstPlayable;
+
+    return CustomScrollView(
+      slivers: [
+        SliverAppBar(
+          expandedHeight: 230,
+          pinned: true,
+          backgroundColor: AppTheme.bg,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => context.pop(),
+          ),
+          actions: [
+            IconButton(
+              tooltip: inList ? 'Bỏ theo dõi' : 'Theo dõi',
+              icon: Icon(
+                inList ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                color: inList ? AppTheme.accent : AppTheme.text,
+              ),
+              onPressed: () {
+                ref.read(watchlistProvider.notifier).toggle(anime.id);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(inList
+                        ? 'Đã bỏ "${anime.displayTitle}" khỏi thư viện'
+                        : 'Đã thêm "${anime.displayTitle}" vào thư viện'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+          ],
+          flexibleSpace: FlexibleSpaceBar(
+            background: Stack(
+              fit: StackFit.expand,
+              children: [
+                NetImage(url: anime.banner ?? anime.cover),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        AppTheme.bg.withAlpha(120),
+                        AppTheme.bg.withAlpha(60),
+                        AppTheme.bg,
+                      ],
+                      stops: const [0, 0.5, 1],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    NetImage(
+                      url: anime.cover,
+                      width: 96,
+                      height: 140,
+                      radius: BorderRadius.circular(10),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            anime.displayTitle,
+                            style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w800,
+                              height: 1.2,
+                              letterSpacing: -0.02,
+                            ),
+                          ),
+                          if (anime.titleNative != null &&
+                              anime.titleNative != anime.title)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3),
+                              child: Text(
+                                anime.titleNative!,
+                                style: const TextStyle(
+                                    fontSize: 11.5, color: AppTheme.muted),
+                              ),
+                            ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              if (anime.score != null)
+                                _meta('★ ${anime.score!.toStringAsFixed(1)}'),
+                              if (anime.year != null) _meta('${anime.year}'),
+                              if (anime.episodesTotal != null)
+                                _meta('${anime.episodesTotal} tập'),
+                              if (anime.format != null) _meta(anime.format!),
+                              if (anime.status == 'RELEASING')
+                                _meta('Đang chiếu', color: AppTheme.green),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // ── nút xem ──
+                if (ep != null)
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () => context.push(
+                        '/watch?video=${ep.videoId}&title=${Uri.encodeComponent(anime.displayTitle)}',
+                      ),
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      label: Text('Xem tập ${ep.number} · miễn phí'),
+                    ),
+                  )
+                else
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppTheme.line),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.info_outline_rounded,
+                            size: 16, color: AppTheme.muted),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Bộ này chưa có bản phát miễn phí chính thức. '
+                            'Xem trên nền tảng bên dưới.',
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                color: AppTheme.muted,
+                                height: 1.4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // ── nền tảng hợp pháp ──
+                if (anime.platforms.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  const Text('Xem trên nền tảng chính thức',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.muted)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: anime.platforms
+                        .map((p) => OutlinedButton.icon(
+                              onPressed: () => _open(p.url),
+                              icon: const Icon(Icons.open_in_new_rounded,
+                                  size: 14),
+                              label: Text(p.name,
+                                  style: const TextStyle(fontSize: 12)),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTheme.text,
+                                side: const BorderSide(color: AppTheme.line),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ],
+
+                // ── nội dung ──
+                if (anime.synopsis.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  Text(
+                    anime.synopsis,
+                    style: const TextStyle(
+                      fontSize: 12.8,
+                      height: 1.62,
+                      color: Color(0xFFC3CBDC),
+                    ),
+                  ),
+                ],
+
+                if (anime.genres.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: anime.genres
+                        .map((g) => Chip(
+                              label: Text(g),
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ))
+                        .toList(),
+                  ),
+                ],
+
+                // ── danh sách tập ──
+                if (anime.episodes.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  Text(
+                    'Tập phim (${anime.episodes.length})',
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              ],
+            ),
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverGrid.builder(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 4,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: 1.35,
+            ),
+            itemCount: anime.episodes.length,
+            itemBuilder: (context, i) {
+              final e = anime.episodes[i];
+              return InkWell(
+                borderRadius: BorderRadius.circular(9),
+                onTap: () {
+                  if (e.playable) {
+                    context.push(
+                      '/watch?video=${e.videoId}&title=${Uri.encodeComponent('${anime.displayTitle} · Tập ${e.number}')}',
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(e.airingAt == null
+                            ? 'Tập ${e.number} chưa có bản phát chính thức'
+                            : 'Tập ${e.number} phát ${VnTime.countdown(e.airingAt!)}'),
+                      ),
+                    );
+                  }
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface2,
+                    borderRadius: BorderRadius.circular(9),
+                    border: Border.all(
+                      color: e.playable ? AppTheme.accent.withAlpha(90) : AppTheme.line,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        e.number == 0 ? 'FULL' : '${e.number}',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: e.playable ? AppTheme.text : AppTheme.muted,
+                        ),
+                      ),
+                      if (e.playable)
+                        const Text('▶',
+                            style: TextStyle(
+                                fontSize: 8, color: AppTheme.accent)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 50)),
+      ],
+    );
+  }
+
+  Widget _meta(String text, {Color? color}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: AppTheme.surface2,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: AppTheme.line),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w600,
+            color: color ?? AppTheme.text,
+          ),
+        ),
+      );
+
+  Future<void> _open(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+}

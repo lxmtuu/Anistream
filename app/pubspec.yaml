@@ -1,0 +1,43 @@
+name: anistream
+description: "AniStream — Xem anime hợp pháp miễn phí. Và thư viện của riêng bạn."
+publish_to: "none"
+version: 0.1.2+3
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # state + routing
+  flutter_riverpod: ^2.5.1
+  go_router: ^14.2.0
+
+  # network / data
+  dio: ^5.5.0
+
+  # UI
+  cached_network_image: ^3.4.1
+  cupertino_icons: ^1.0.8
+  intl: ^0.19.0
+
+  # open official platforms (Netflix, Crunchyroll…) / fallback player
+  url_launcher: ^6.3.0
+
+  # push "tập mới vừa ra" (FCM — miễn phí, không giới hạn)
+  firebase_core: ^3.6.0
+  firebase_messaging: ^15.1.5
+  shared_preferences: ^2.3.3
+
+  # nhúng YouTube bằng IFrame Player API CHÍNH THỨC (hợp pháp, không trích xuất stream)
+  youtube_player_iframe: ^5.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

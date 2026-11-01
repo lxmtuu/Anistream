@@ -1,0 +1,49 @@
+name: ingest
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # Job A: lịch phát
+    - cron: "0 */6 * * *"    # Job C: video official
+    - cron: "17 19 * * *"    # Job B: catalog (02:17 giờ VN)
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "schedule | catalog | youtube | all"
+        default: "all"
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r ingest/requirements.txt
+
+      - name: Chọn job theo cron
+        id: pick
+        run: |
+          case "${{ github.event.schedule }}" in
+            "*/30 * * * *") echo "cmd=schedule"  >> $GITHUB_OUTPUT ;;
+            "0 */6 * * *")  echo "cmd=youtube"   >> $GITHUB_OUTPUT ;;
+            "17 19 * * *")  echo "cmd=catalog"   >> $GITHUB_OUTPUT ;;
+            *)              echo "cmd=${{ github.event.inputs.command || 'all' }}" >> $GITHUB_OUTPUT ;;
+          esac
+
+      - name: Chạy ingest
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TMDB_API_KEY:         ${{ secrets.TMDB_API_KEY }}
+          INGEST_COMMAND:       ${{ steps.pick.outputs.cmd }}
+        run: python -m ingest.main "$INGEST_COMMAND"
+
