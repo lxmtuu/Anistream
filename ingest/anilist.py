@@ -109,6 +109,22 @@ def season_of(month: int) -> str:
     return "FALL"
 
 
+def clean_html(text: str | None) -> str | None:
+    """AniList trả description dạng HTML nhẹ (<br>, <i>, <a>…). App render Text
+    thuần nên phải strip tag, giữ lại nội dung. Trả None nếu rỗng.
+    """
+    if not text:
+        return None
+    import re
+    s = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+    s = re.sub(r"<[^>]+>", "", s)
+    s = (s.replace("&amp;", "&").replace("&quot;", '"').replace("&#039;", "'")
+          .replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " "))
+    s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r"\n{3,}", "\n\n", s).strip()
+    return s or None
+
+
 def slugify(text: str, fallback_id: int) -> str:
     import re
     s = (text or "").lower()
@@ -140,6 +156,10 @@ def to_anime_row(m: Dict) -> Dict:
         "score": round(m["averageScore"] / 10, 1) if m.get("averageScore") else None,
         "popularity": m.get("popularity") or 0,
         "genres": m.get("genres") or [],
+        # AniList có sẵn mô tả (thường tiếng Anh) → dùng làm nội dung dự phòng khi
+        # chưa có bản dịch tiếng Việt. Trước đây field này bị vứt đi nên
+        # `synopsis` trong API LUÔN rỗng → trang chi tiết trống phần giới thiệu.
+        "synopsis_original": clean_html(m.get("description")),
         "studios": [n["name"] for n in studio_nodes if n.get("name")],
         "source": "anilist",
         "last_synced_at": None,   # Postgres tự set bằng now() ở tầng dưới

@@ -51,7 +51,7 @@ Deno.serve(
         .select(
           "id, slug, title_romaji, title_english, title_vi, title_native, cover_url, " +
             "banner_url, year, season, status, format, episodes_total, score, " +
-            "popularity, genres, synopsis_vi",
+            "popularity, genres, synopsis_vi, synopsis_original",
           { count: "exact", head },
         )
         .eq("is_published", true);

@@ -21,7 +21,7 @@ import { toInt } from "../_shared/query.ts";
 const CARD_COLUMNS =
   "id, slug, title_romaji, title_english, title_vi, title_native, cover_url, " +
   "banner_url, year, season, status, format, episodes_total, score, popularity, " +
-  "genres, synopsis_vi";
+  "genres, synopsis_vi, synopsis_original";
 
 Deno.serve(
   withGuard(async (req: Request) => {

@@ -110,8 +110,12 @@ else
 fi
 
 # ── 6. Tuỳ chọn (không chặn) ───────────────────────────────────────────────
-[ -n "${TMDB_API_KEY:-}" ]    && ok "có TMDB_API_KEY (tên + tóm tắt tiếng Việt)" \
-                              || warn "không có TMDB_API_KEY → thiếu title_vi/synopsis_vi"
+# ⚠️ TMDB CHƯA được code: ingest chỉ ĐỌC biến TMDB_API_KEY rồi bỏ qua, nên đặt
+# key vào cũng KHÔNG có title_vi/synopsis_vi. Đừng hứa hão ở đây nữa.
+if [ -n "${TMDB_API_KEY:-}" ]; then
+  warn "có TMDB_API_KEY nhưng ingest CHƯA dùng biến này (title_vi/synopsis_vi vẫn trống)"
+fi
+# Mô tả gốc: lấy từ AniList `description` → cột synopsis_original (không cần key)
 [ -n "${YOUTUBE_API_KEY:-}" ] && ok "có YOUTUBE_API_KEY (deep backfill)" \
                               || warn "không có YOUTUBE_API_KEY → chỉ lấy ~15 video mới nhất/kênh"
 

@@ -44,8 +44,9 @@ Keys → mục `service_role` → Reveal → Copy**.
 sẽ bị RLS chặn — preflight ở bước 2 sẽ bắt lỗi này trước khi bạn mất 5 phút chạy ingest.
 
 Hai dòng còn lại để trống vẫn chạy được:
-- `TMDB_API_KEY` — có thì anime mới hiện **tên + tóm tắt tiếng Việt**, không có thì
-  app vẫn chạy nhưng phần lớn tiêu đề là romaji.
+- `TMDB_API_KEY` — **cứ để trống**: ingest hiện CHƯA dùng biến này (chưa có bước dịch
+  nào trong code), đặt key cũng không ra `title_vi`/`synopsis_vi`. Tóm tắt phim lấy
+  từ AniList (`anime.synopsis_original`), không cần key nào.
 - `YOUTUBE_API_KEY` — có thì lấy được **toàn bộ** video cũ của kênh official
   (deep backfill), không có thì chỉ ~15 video mới nhất/kênh.
 
@@ -106,6 +107,23 @@ python3 -m ingest.main all --dry-run
 ```
 
 ---
+
+## Bước 3b — Nạp lại để có mô tả phim (30 giây)
+
+Bản vá 2026-11-01 thêm cột `anime.synopsis_original` (mô tả lấy từ AniList). Dữ liệu
+cũ chưa có cột này → chạy lại một lần:
+
+```bash
+python3 -m ingest.main schedule
+```
+
+**Kỳ vọng:** job A chạy xong. Kiểm trong SQL Editor:
+
+```sql
+select count(*) from anime where synopsis_original is not null;   -- phải > 0
+```
+
+Trước bản vá, `synopsis` trong API **luôn rỗng** nên trang chi tiết trống phần giới thiệu.
 
 ## Bước 4 — Kiểm chứng bằng số (2 phút)
 
