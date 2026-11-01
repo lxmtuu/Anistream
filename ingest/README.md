@@ -49,7 +49,8 @@ Quy tắc **thà thiếu còn hơn sai**:
 |---|---|
 | Không ghép được tên/năm | Bỏ qua, in `không tìm được trên TMDB` — **không đoán bừa** |
 | `title_vi`/`synopsis_vi` đã có | **Không ghi đè** (dữ liệu biên tập tay được giữ) |
-| Phim nhiều mùa | Chỉ lấy tên/tóm tắt; **không** lấy số tập (Takagi-san 3 mùa = 36 tập, không phải 12) |
+| Phim nhiều mùa | **Chọn đúng mùa** rồi mới lấy tập: (1) TMDB chỉ có 1 mùa → mùa đó; (2) đúng 1 mùa có NĂM = năm AniList → mùa đó (Takagi-san 2018 → S1, không phải S3); (3) đúng 1 mùa có SỐ TẬP = số tập AniList; (4) còn lại → **bỏ**, không lấy tập |
+| TMDB trả nhiều tập hơn AniList | Không ghi (`episodes_plausible`, dư ≤ 2 tập thì bỏ qua) — vd Fool Night: AniList 3, TMDB 12 |
 | Bản dịch `vi` rỗng | Thử `alternative_titles` VN; trùng y tên gốc thì coi là chưa có |
 | `TMDB_API_KEY` sai (401) | Nổ ngay `TmdbError`, không nuốt |
 | Chạy `all` mà không có key | In cảnh báo rõ + ghi `ingest_runs(ok=false)`, các job khác vẫn chạy |

@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/theme.dart';
 import '../../core/models/anime.dart';
+import '../../core/models/genre_vi.dart';
 import '../../core/widgets/net_image.dart';
 import '../../data/anime_repository.dart';
 
@@ -86,6 +87,10 @@ class _DetailBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final inList = ref.watch(watchlistProvider).contains(anime.id);
     final ep = anime.firstPlayable;
+    // Danh sách tập đến từ 2 nguồn: lịch phát TMDB/AniList (biết đủ số tập)
+    // và link YouTube official (chỉ một phần tập có bản phát). Hiện cả hai con
+    // số để người dùng không bấm nhầm vào tập chưa phát được.
+    final playableCount = anime.episodes.where((e) => e.playable).length;
 
     return CustomScrollView(
       slivers: [
@@ -294,7 +299,7 @@ class _DetailBody extends ConsumerWidget {
                     runSpacing: 6,
                     children: anime.genres
                         .map((g) => Chip(
-                              label: Text(g),
+                              label: Text(genreVi(g)),
                               visualDensity: VisualDensity.compact,
                               materialTapTargetSize:
                                   MaterialTapTargetSize.shrinkWrap,
@@ -306,10 +311,28 @@ class _DetailBody extends ConsumerWidget {
                 // ── danh sách tập ──
                 if (anime.episodes.isNotEmpty) ...[
                   const SizedBox(height: 20),
-                  Text(
-                    'Tập phim (${anime.episodes.length})',
-                    style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w700),
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    children: [
+                      Text(
+                        'Tập phim (${anime.episodes.length})',
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w700),
+                      ),
+                      if (playableCount > 0)
+                        Text(
+                          '· $playableCount tập xem được',
+                          style: const TextStyle(
+                              fontSize: 11.5, color: AppTheme.green),
+                        )
+                      else
+                        const Text(
+                          '· chưa có bản phát miễn phí',
+                          style: TextStyle(
+                              fontSize: 11.5, color: AppTheme.muted),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -320,11 +343,14 @@ class _DetailBody extends ConsumerWidget {
         SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           sliver: SliverGrid.builder(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 4,
+            // Trước đây là 4 cột cố định → trên desktop (Chrome) mỗi ô rộng
+            // ~370px và cao ~270px, chỉ có một con số ở giữa: nhìn như ô trống.
+            // MaxCrossAxisExtent giữ ô luôn ~150–170px ở mọi bề rộng màn hình.
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 168,
               mainAxisSpacing: 8,
               crossAxisSpacing: 8,
-              childAspectRatio: 1.35,
+              childAspectRatio: 1.1,
             ),
             itemCount: anime.episodes.length,
             itemBuilder: (context, i) {
@@ -355,21 +381,51 @@ class _DetailBody extends ConsumerWidget {
                     ),
                   ),
                   alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 8),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
                         e.number == 0 ? 'FULL' : '${e.number}',
                         style: TextStyle(
-                          fontSize: 15,
+                          fontSize: 16,
                           fontWeight: FontWeight.w800,
                           color: e.playable ? AppTheme.text : AppTheme.muted,
                         ),
                       ),
+                      // Tên tập lấy từ TMDB (đã gọi API với language=vi-VN)
+                      if (e.title.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text(
+                            e.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 9,
+                              height: 1.25,
+                              color: AppTheme.muted,
+                            ),
+                          ),
+                        ),
                       if (e.playable)
-                        const Text('▶',
-                            style: TextStyle(
-                                fontSize: 8, color: AppTheme.accent)),
+                        const Padding(
+                          padding: EdgeInsets.only(top: 4),
+                          child: Text('▶ xem được',
+                              style: TextStyle(
+                                  fontSize: 8.5, color: AppTheme.accent)),
+                        )
+                      else if (e.airingAt != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            VnTime.countdown(e.airingAt!),
+                            style: const TextStyle(
+                                fontSize: 8.5, color: AppTheme.muted),
+                          ),
+                        ),
                     ],
                   ),
                 ),

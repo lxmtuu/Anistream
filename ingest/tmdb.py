@@ -12,8 +12,10 @@ Cách làm (rẻ → đắt, ~3 request/anime):
 Quy tắc chống rác (quan trọng — thà thiếu còn hơn sai):
   · Nếu không chắc tên/năm thì BỎ QUA, đếm vào `chưa khớp`, không đoán bừa.
   · KHÔNG ghi đè dữ liệu đã có (title_vi/synopsis_vi do người biên tập).
-  · `episodes_total` + danh sách tập CHỈ lấy khi TMDB có đúng 1 mùa: anime nhiều
-    mùa (vd Takagi-san 3 mùa = 36 tập) sẽ bị gán sai số tập cho 1 entry AniList.
+  · TMDB gộp cả series vào 1 id, AniList tách từng mùa. Phải CHỌN ĐÚNG MÙA
+    (`pick_season`: mùa duy nhất → khớp năm → khớp số tập → bỏ) rồi mới lấy
+    `episodes_total` + danh sách tập. Không chắc thì để trống, không đoán.
+  · TMDB trả nhiều tập hơn hẳn AniList (`episodes_plausible`) → không ghi.
 """
 import datetime as dt
 import re
@@ -227,6 +229,7 @@ def build_anime_patch(
     title_vi: Optional[str],
     overview_vi: Optional[str],
     single_season: bool,
+    episodes_total_hint: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Chỉ điền chỗ TRỐNG. Không bao giờ ghi đè dữ liệu đã có."""
     patch: Dict[str, Any] = {}
@@ -240,8 +243,11 @@ def build_anime_patch(
     if not (row.get("synopsis_vi") or "").strip() and overview_vi:
         patch["synopsis_vi"] = overview_vi
 
-    # Chỉ tin `number_of_episodes` khi phim có đúng 1 mùa — xem docstring đầu file.
-    total = detail.get("number_of_episodes")
+    # Chỉ tin số tập khi đã xác định được ĐÚNG mùa ứng với entry AniList.
+    # `number_of_episodes` là tổng của CẢ series → sai với entry "mùa 2";
+    # nên ưu tiên số tập của mùa đã chọn (`episodes_total_hint`).
+    total = episodes_total_hint if isinstance(episodes_total_hint, int) and episodes_total_hint > 0 \
+        else detail.get("number_of_episodes")
     if single_season and not row.get("episodes_total") and isinstance(total, int) and total > 0:
         patch["episodes_total"] = total
 
@@ -255,7 +261,7 @@ def episode_rows(
 ) -> List[Dict[str, Any]]:
     """Đổi season TMDB → rows cho bảng `episodes`. Bỏ qua nếu không đủ tin cậy."""
     if not single_season:
-        return []
+        return []   # chưa xác định được mùa → không ghi tập (tránh gán tập mùa khác)
     out = []
     for e in season.get("episodes") or []:
         num = e.get("episode_number")
@@ -281,6 +287,80 @@ def real_seasons(detail: Dict[str, Any]) -> List[int]:
         s["season_number"] for s in (detail.get("seasons") or [])
         if isinstance(s.get("season_number"), int) and s["season_number"] > 0
     )
+
+
+def season_candidates(detail: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Các mùa thật (bỏ specials) kèm số tập + ngày chiếu.
+
+    AniList tách mỗi mùa thành MỘT entry riêng ("… 2nd Season"), còn TMDB gộp
+    cả series vào một id nhiều mùa. Muốn lấy đúng danh sách tập thì phải biết
+    entry AniList đang nói tới mùa nào — xem `pick_season`.
+    """
+    out = []
+    for s in detail.get("seasons") or []:
+        n = s.get("season_number")
+        if not isinstance(n, int) or n <= 0:
+            continue
+        out.append({
+            "number": n,
+            "count": s.get("episode_count"),
+            "air_date": (s.get("air_date") or ""),
+        })
+    return sorted(out, key=lambda x: x["number"])
+
+
+def _year_of(date_str: str) -> Optional[int]:
+    m = re.match(r"^(\d{4})", date_str or "")
+    return int(m.group(1)) if m else None
+
+
+def pick_season(
+    detail: Dict[str, Any],
+    year: Optional[int] = None,
+    episodes_total: Optional[int] = None,
+) -> Tuple[Optional[int], str]:
+    """Chọn mùa TMDB ứng với 1 entry AniList. Trả (season_number | None, lý do).
+
+    Thứ tự tin cậy:
+      1. TMDB chỉ có 1 mùa            → mùa đó (chắc chắn)
+      2. đúng 1 mùa có NĂM = năm AniList → mùa đó (Takagi-san 2018 → S1, không phải S3)
+      3. đúng 1 mùa có SỐ TẬP = số tập AniList → mùa đó
+      4. còn lại → None. KHÔNG đoán: thà trống còn hơn gán tập của mùa khác.
+    """
+    seasons = season_candidates(detail)
+    if not seasons:
+        return None, "TMDB không có mùa nào"
+    if len(seasons) == 1:
+        return seasons[0]["number"], "mùa duy nhất"
+
+    if year:
+        by_year = [s for s in seasons if _year_of(s["air_date"]) == int(year)]
+        if len(by_year) == 1:
+            return by_year[0]["number"], f"khớp năm {year}"
+
+    if episodes_total:
+        by_count = [s for s in seasons if s["count"] == int(episodes_total)]
+        if len(by_count) == 1:
+            return by_count[0]["number"], f"khớp {episodes_total} tập"
+
+    return None, f"{len(seasons)} mùa, không xác định được mùa nào"
+
+
+def episodes_plausible(
+    episodes_total: Optional[int],
+    season_count: int,
+    tolerance: int = 2,
+) -> bool:
+    """Danh sách tập của mùa có hợp với số tập AniList biết không?
+
+    - AniList biết tổng (vd 12) mà mùa TMDB trả 12  → hợp
+    - phim đang chiếu: AniList ghi 12, TMDB mới có 8 → hợp (còn thiếu)
+    - TMDB trả NHIỀU HƠN hẳn tổng (vd AniList 3, TMDB 12) → nghi lấy nhầm
+      mùa/series → KHÔNG ghi, để trống (xem "Fool Night" trong BAN_LAM_TIEP).
+    """
+    if not episodes_total or season_count <= 0:
+        return True
+    return season_count <= int(episodes_total) + tolerance
 
 
 # ─────────────────────────────────────────── API mức cao (1 anime)
