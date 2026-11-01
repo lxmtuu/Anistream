@@ -259,6 +259,23 @@ select count(distinct anime_id) from streaming_links where kind='free_legal' and
 select count(*) from streaming_links where kind='free_legal' and is_verified;
 ```
 
+**Sau lần chạy ĐẦU TIÊN bằng bản mới — dọn link cũ bị gán sai tập** (vd video gộp
+`Tập 01-24` từng bị lưu thành tập 1). Bản mới lưu `source_title` cho mọi link, nên
+dòng **không có** `source_title` chính là dòng do bản cũ tạo ra:
+
+```sql
+-- chạy SAU khi đã ingest lại cả 2 kênh thành công
+delete from streaming_links where kind = 'free_legal' and source_title is null;
+```
+
+Rồi kiểm:
+
+```sql
+select count(*) filter (where source_title is null) as con_cu,
+       count(*) filter (where episode_number = 0) as ban_gop_ca_bo
+from streaming_links where kind = 'free_legal';       -- con_cu phải = 0
+```
+
 **3 lỗi hay gặp** (script `check_keys.sh` phân biệt được từng cái):
 
 | Triệu chứng | Nguyên nhân | Sửa |

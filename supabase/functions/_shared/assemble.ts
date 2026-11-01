@@ -155,12 +155,15 @@ export function toAnimeDto(
   }
   eps.sort((a, b) => a.number - b.number);
 
-  // có link free cho cả bộ (episode_number = 0) mà không có episodes → tạo 1 entry FULL
-  if (eps.length === 0 && videoByEpisode.has(0)) {
+  // Link cho CẢ BỘ (episode_number = 0, vd "[Bản Lồng Tiếng] One Punch Man - Tập 01-24"
+  // là 1 video 24 tập) phải luôn hiện, kể cả khi bộ đã có danh sách tập.
+  // Bản cũ chỉ thêm khi `eps.length === 0` → người dùng mất hẳn bản gộp.
+  // Đặt CUỐI danh sách để "Xem ngay" vẫn trỏ vào tập 1 (không phải video 24 tập).
+  if (videoByEpisode.has(0) && !eps.some((e) => e.number === 0)) {
     const v = videoByEpisode.get(0)!;
     eps.push({
       number: 0,
-      title: "Full",
+      title: "Cả bộ",
       video_id: v.id,
       platform: v.platform,
       airing_at: null,

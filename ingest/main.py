@@ -149,6 +149,9 @@ def _link_rows(DB, videos, cache, verbose=True):
             "kind": "free_legal",
             "is_verified": True,
             "verified_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            # Truy ngược: link này đến từ tiêu đề YouTube nào? Cần khi số tập bị
+            # parse sai (vd bản gộp "Tập 01-24" từng bị gán thành tập 1).
+            "source_title": (v.get("raw_title") or "")[:300] or None,
         })
     return rows, links, unmatched
 

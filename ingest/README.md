@@ -136,6 +136,29 @@ curl -s "https://www.youtube.com/@TenKenh" | grep -o '"channelId":"UC[^"]*"' | h
 ```
 Thêm vào `youtube.py` → `CHANNELS` với `key`, `name`, `channel_id`, `region`.
 
+### Bản gộp nhiều tập (quan trọng)
+
+Muse/Ani-One hay đăng **1 video chứa cả bộ** hoặc **một dải tập**:
+
+| Tiêu đề | Trước đây | Bây giờ |
+|---|---|---|
+| `[Bản Lồng Tiếng] One Punch Man - Tập 01-24` | `episode=1` ❌ (app ghi "Tập 1", bấm vào ra video 24 tập, còn **ghi đè** link tập 1 thật) | `episode=0` → hiện thành ô **CẢ BỘ**, đứng cuối danh sách |
+| `鬼滅の刃 第01-26話` | không parse được → mất | `episode=0` |
+| `Crayon Shin-chan Tập 1000-1099` | `episode=1000` ❌ | **bỏ** (bản gộp một phần: không có số tập nào đúng) |
+| `One Punch Man Tập 5-8` | `episode=5` ❌ | **bỏ** |
+
+Nguyên tắc: chỉ nhận dải tập khi nó **bắt đầu từ tập 1** (cả bộ). Dải bắt đầu từ giữa
+thì gán số nào cũng sai → bỏ, thà thiếu còn hơn sai.
+
+Để truy ngược khi số tập bị parse sai, mỗi link lưu thêm `source_title` = tiêu đề
+YouTube gốc. Kiểm:
+
+```sql
+select a.slug, l.episode_number, left(l.source_title, 50) as tieu_de
+from streaming_links l join anime a on a.id = l.anime_id
+where l.source_title ilike '%tập%' and l.episode_number = 0;
+```
+
 ### Khi log báo "chưa khớp"
 Tên tiếng Trung không search được trên AniList → thêm vào `aliases.json`:
 ```json

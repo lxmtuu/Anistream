@@ -26,4 +26,40 @@ class TestMuseRSS(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 youtube.collect(check_embed=False, verbose=False)
 
+class TestDaiTap(unittest.TestCase):
+    """Bản gộp nhiều tập — ca thật từ ảnh chụp app.
+
+    Video "[Bản Lồng Tiếng] One Punch Man - Tập 01-24" (1 video chứa 24 tập) từng
+    bị parse thành `episode=1` → app ghi "Tập 1", bấm vào ra video 24 tập, và
+    còn GHI ĐÈ link tập 1 thật (khoá upsert anime_id+platform+region+episode).
+    """
+
+    def test_ban_gop_ca_bo_thanh_episode_0(self):
+        p = youtube.parse_title('[Bản Lồng Tiếng] One Punch Man - Tập 01-24')
+        self.assertEqual(p['episode'], 0, 'bản gộp cả bộ = episode 0 (link cho cả bộ)')
+        self.assertEqual(p['series'], 'One Punch Man')
+        self.assertEqual(p['kind'], 'series')
+
+    def test_ban_gop_ca_bo_tieng_trung(self):
+        p = youtube.parse_title('鬼滅の刃 第01-26話')
+        self.assertEqual(p['episode'], 0)
+        self.assertEqual(p['series'], '鬼滅の刃')
+
+    def test_ban_gop_ca_bo_ep(self):
+        self.assertEqual(youtube.parse_title('One Punch Man Ep 01-12')['episode'], 0)
+
+    def test_ban_gop_mot_phan_thi_BO_QUA_khong_gan_sai(self):
+        # "Tập 1000-1099" không có số tập đúng để gán → bỏ, thà thiếu còn hơn sai
+        self.assertIsNone(youtube.parse_title('Crayon Shin-chan Tập 1000-1099'))
+        self.assertIsNone(youtube.parse_title('One Punch Man Tập 5-8'))
+
+    def test_tap_le_van_dung(self):
+        self.assertEqual(youtube.parse_title('One Punch Man - Tập 1')['episode'], 1)
+        self.assertEqual(youtube.parse_title('鬼滅の刃 第5話')['episode'], 5)
+        self.assertEqual(youtube.parse_title('One Punch Man Ep. 7')['episode'], 7)
+
+    def test_dai_tap_khong_anh_huong_ten_series(self):
+        self.assertEqual(youtube.parse_title('Crayon Shin-chan Tập 3')['series'],
+                         'Crayon Shin-chan')
+
 if __name__ == '__main__': unittest.main()

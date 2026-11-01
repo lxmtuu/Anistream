@@ -216,7 +216,9 @@ class _DetailBody extends ConsumerWidget {
                         '/watch?video=${ep.videoId}&title=${Uri.encodeComponent(anime.displayTitle)}',
                       ),
                       icon: const Icon(Icons.play_arrow_rounded),
-                      label: Text('Xem tập ${ep.number} · miễn phí'),
+                      label: Text(ep.number == 0
+                          ? 'Xem cả bộ · miễn phí'
+                          : 'Xem tập ${ep.number} · miễn phí'),
                     ),
                   )
                 else
@@ -366,7 +368,9 @@ class _DetailBody extends ConsumerWidget {
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text(e.airingAt == null
+                        content: Text(e.number == 0
+                            ? 'Bản gộp cả bộ chưa phát được trong app'
+                            : e.airingAt == null
                             ? 'Tập ${e.number} chưa có bản phát chính thức'
                             : e.airingAt!.isAfter(DateTime.now())
                                 ? 'Tập ${e.number} chiếu sau '
@@ -392,7 +396,7 @@ class _DetailBody extends ConsumerWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        e.number == 0 ? 'FULL' : '${e.number}',
+                        e.number == 0 ? 'CẢ BỘ' : '${e.number}',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
