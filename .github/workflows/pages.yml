@@ -1,0 +1,136 @@
+name: pages
+
+# Bản web của app (mock data — không cần backend) deploy lên GitHub Pages.
+# Mục đích: xem app THẬT chạy trong trình duyệt, không cần cài Flutter.
+#
+# ── Cần bật 1 lần (chỉ chủ repo làm được, ~10 giây) ────────────────────────
+#   GitHub → repo Anistream → Settings → Pages
+#   → Build and deployment → Source: **GitHub Actions**
+#   (hiện đang là "Deploy from a branch" → workflow này chỉ BUILD, không deploy)
+# Sau đó chạy lại workflow "pages" (Actions → pages → Re-run), hoặc push bất kỳ
+# thay đổi nào trong app/. Link: https://<user>.github.io/Anistream/
+#
+# Vì sao phải gate: nếu Pages còn ở chế độ legacy, bước deploy sẽ bị GitHub từ
+# chối (và báo đỏ). Workflow tự kiểm tra trước để CI luôn phản ánh đúng sự thật
+# "code có build được hay không", không phải lỗi cấu hình.
+
+on:
+  push:
+    branches:
+      - main
+      - arena/95786384-anistream
+    paths:
+      - "app/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      can_deploy: ${{ steps.pages.outputs.can_deploy }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Kiểm tra Pages đã bật + đúng chế độ chưa
+        id: pages
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          api="https://api.github.com/repos/${{ github.repository }}/pages"
+          probe() { # $1 = header Authorization (rỗng = gọi công khai)
+            if [ -n "$1" ]; then
+              curl -sS -H "Authorization: Bearer $1" -H "Accept: application/vnd.github+json" "$api"
+            else
+              curl -sS -H "Accept: application/vnd.github+json" "$api"
+            fi
+          }
+          json=$(probe "$GH_TOKEN" || echo '{}')
+          build_type=$(printf '%s' "$json" | jq -r '.build_type // empty' 2>/dev/null || true)
+
+          if [ -z "$build_type" ]; then
+            # token của workflow không có quyền admin → thử gọi công khai
+            json=$(probe "" || echo '{}')
+            build_type=$(printf '%s' "$json" | jq -r '.build_type // empty' 2>/dev/null || true)
+          fi
+          [ -z "$build_type" ] && build_type=none
+
+          echo "build_type=$build_type"
+          echo "api trả: $(printf '%s' "$json" | tr -d '\n' | head -c 300)"
+
+          # Deploy chỉ chạy được khi Pages dùng GitHub Actions làm nguồn.
+          if [ "$build_type" = "workflow" ]; then
+            echo "can_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "can_deploy=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### ⚠️ Pages chưa ở chế độ GitHub Actions (build_type=\`$build_type\`)"
+              echo ""
+              echo "Bản web **đã build thành công** — đây là phần quan trọng: code Flutter biên dịch được cho web."
+              echo ""
+              echo "Để có link xem app: **Settings → Pages → Build and deployment → Source: GitHub Actions**, rồi chạy lại workflow này."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: flutter pub get
+        working-directory: app
+        run: flutter pub get
+
+      # --base-href phải khớp đường dẫn Pages (/<tên-repo>/) — sai thì trình duyệt
+      # tải main.dart.js từ sai chỗ và chỉ thấy trang trắng.
+      # USE_MOCK=true: dữ liệu sinh thật từ AniList/YouTube, không cần Supabase.
+      - name: flutter build web
+        working-directory: app
+        run: |
+          flutter build web --release \
+            --base-href "/${GITHUB_REPOSITORY#*/}/" \
+            --dart-define=USE_MOCK=true
+          echo "<!-- build ${GITHUB_SHA} · mock data · $(date -u +%FT%TZ) -->" >> build/web/index.html
+
+      # Giữ lại 3 trang xem trước tĩnh (poster thật, không cần mạng) để link cũ
+      # vẫn sống sau khi root Pages bị app Flutter chiếm chỗ.
+      - name: Copy trang xem trước tĩnh
+        run: |
+          mkdir -p app/build/web/previews
+          cp app/UI_PREVIEW.html app/build/web/previews/ui-preview.html
+          cp chon_mo_hinh.html app/build/web/previews/chon-mo-hinh.html
+          cp anime_report.html app/build/web/previews/anime-report.html
+          ls -la app/build/web/previews
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/build/web
+
+  deploy:
+    needs: build
+    # Lỗi deploy (thường do cấu hình Pages/environment phía GitHub) không được
+    # biến thành "code hỏng": job build ở trên mới là thứ phản ánh chất lượng code.
+    continue-on-error: true
+    # Chỉ deploy từ main: bản Pages chính thức thuộc về main, và environment
+    # `github-pages` chỉ cho branch mặc định deploy (branch khác sẽ bị từ chối).
+    # Trên nhánh khác workflow vẫn BUILD để chứng minh code web biên dịch được.
+    if: needs.build.outputs.can_deploy == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

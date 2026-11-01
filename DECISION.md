@@ -80,10 +80,16 @@ Lý do đóng băng: 90% dự án một người chết vì mở rộng phạm v
 
 ## 5. Việc tiếp theo (thứ tự cố định)
 
+> Rà soát 01/11/2026 (`BAO_CAO_RA_SOAT.md`) đã sửa 6 lỗi thật, trong đó 2 lỗi chặn
+> phát hành: manifest Android thiếu `INTERNET`, và watchlist chỉ nằm trong RAM.
+
 1. ✅ Ingest worker — **xong**
 2. ✅ **Flutter scaffold v1** — đã có (Home/Detail/Search/Schedule/Player/Watchlist, chạy bằng mock data thật)
 3. ✅ **Edge Functions `/home` `/anime` `/search` `/schedule`** — đã có, chỉ cần deploy + `USE_MOCK=false`
-4. ⏭ Auth + watchlist persist (Drift + Supabase Auth; RLS đã sẵn trong schema)
+4. 🟡 **Watchlist persist trên máy — ✅ xong** (`app/lib/data/watchlist_store.dart`,
+   SharedPreferences + interface `WatchlistStore`; bỏ Drift ở v1 vì Drift buộc
+   `build_runner` codegen, SharedPreferences đủ cho vài chục bộ).
+   ⏭ Còn lại: **Auth + đồng bộ đa thiết bị** (Supabase Auth; RLS đã sẵn trong schema)
 5. ✅ Push FCM tập mới — đã có (cần `flutterfire configure` để chạy thật)
 6. Desktop build (media_kit) + submit store
 

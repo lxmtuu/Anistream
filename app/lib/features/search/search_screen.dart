@@ -22,6 +22,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   List<Anime> _results = const [];
   bool _loading = false;
   String _query = '';
+  String? _error;
 
   @override
   void dispose() {
@@ -36,22 +37,42 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Future<void> _run(String value) async {
-    if (value.trim().isEmpty) {
+    final q = value.trim();
+    if (q.isEmpty) {
       setState(() {
         _results = const [];
         _query = '';
+        _error = null;
         _loading = false;
       });
       return;
     }
-    setState(() => _loading = true);
-    final items = await ref.read(animeRepositoryProvider).search(value);
-    if (!mounted) return;
+
     setState(() {
-      _results = items;
-      _query = value;
-      _loading = false;
+      _loading = true;
+      _error = null;
     });
+
+    try {
+      final items = await ref.read(animeRepositoryProvider).search(q);
+      // Người dùng đã gõ tiếp trong lúc chờ → bỏ kết quả cũ để không "nhảy".
+      if (!mounted || q != _controller.text.trim()) return;
+      setState(() {
+        _results = items;
+        _query = q;
+        _loading = false;
+      });
+    } catch (e) {
+      // Mất mạng / backend lỗi: hiện lỗi + nút thử lại thay vì treo spinner
+      // (trước đây lỗi này làm Future ném ra ngoài và màn hình quay mãi).
+      if (!mounted) return;
+      setState(() {
+        _results = const [];
+        _query = q;
+        _error = '$e';
+        _loading = false;
+      });
+    }
   }
 
   @override
@@ -115,7 +136,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   ? const Center(
                       child:
                           CircularProgressIndicator(color: AppTheme.accent))
-                  : _query.isEmpty
+                  : _error != null
+                      ? _SearchError(
+                          message: _error!,
+                          onRetry: () => _run(_controller.text),
+                        )
+                      : _query.isEmpty
                       ? _Suggestions(items: suggestions)
                       : _results.isEmpty
                           ? const Center(
@@ -134,6 +160,50 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                               itemBuilder: (context, i) =>
                                   _ResultRow(anime: _results[i]),
                             ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchError extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _SearchError({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off_rounded, size: 38, color: AppTheme.muted),
+            const SizedBox(height: 12),
+            const Text(
+              'Không tìm được — kiểm tra kết nối mạng.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10.5, color: AppTheme.muted),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton(
+              onPressed: onRetry,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.text,
+                side: const BorderSide(color: AppTheme.line),
+              ),
+              child: const Text('Thử lại'),
             ),
           ],
         ),

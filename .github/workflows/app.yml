@@ -1,0 +1,70 @@
+name: app
+
+# CI cho app Flutter: mỗi lần sửa app/ là analyze + test tự chạy.
+# Mục đích: bắt lỗi biên dịch trước khi phải mở máy có Flutter SDK.
+# Chi phí: 0đ (repo public → GitHub Actions free).
+
+on:
+  push:
+    paths:
+      - "app/**"
+      - ".github/workflows/app.yml"
+  pull_request:
+    paths:
+      - "app/**"
+      - ".github/workflows/app.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      # Chỉ FAIL khi có LỖI biên dịch (error).
+      # Lint info/warning (vd. prefer_single_quotes) chỉ in ra để xem, không chặn
+      # merge — dự án còn 4.700 dòng code, sửa hết lint style lúc này là vô nghĩa.
+      - name: flutter analyze
+        run: |
+          set +e
+          flutter analyze --no-fatal-infos --no-fatal-warnings > /tmp/analyze.txt 2>&1
+          code=$?
+          cat /tmp/analyze.txt
+          {
+            echo "### flutter analyze (exit $code)"
+            echo '```'
+            tail -c 12000 /tmp/analyze.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $code
+
+      - name: flutter test
+        run: |
+          set +e
+          flutter test --reporter expanded > /tmp/test.txt 2>&1
+          code=$?
+          cat /tmp/test.txt
+          {
+            echo "### flutter test (exit $code)"
+            echo '```'
+            tail -c 12000 /tmp/test.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $code

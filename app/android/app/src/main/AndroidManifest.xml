@@ -1,4 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Bắt buộc cho bản release: tải poster, gọi Edge Function, phát YouTube.
+         Template của Flutter chỉ khai báo quyền này trong debug/profile, nên
+         nếu thiếu ở đây thì APK/AAB release sẽ không có mạng. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Android 13+ (API 33): không khai báo thì thông báo "tập mới vừa ra"
+         không bao giờ hiện, kể cả khi Firebase đã cấu hình đúng. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:label="anistream"
         android:name="${applicationName}"

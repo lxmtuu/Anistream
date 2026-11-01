@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="vi">
 <head>
   <!--
     If you are serving your web app in a path other than the root, change the
@@ -8,9 +8,6 @@
     The path provided below has to start and end with a slash "/" in order for
     it to work correctly.
 
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
     This is a placeholder for base href that will be replaced by the value of
     the `--base-href` argument provided to `flutter build`.
   -->
@@ -18,29 +15,88 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="AniStream — xem anime hợp pháp miễn phí, lịch phát chính xác, thư viện của riêng bạn.">
+  <meta name="theme-color" content="#0B0C10">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="anistream">
+  <meta name="apple-mobile-web-app-title" content="AniStream">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>anistream</title>
+  <title>AniStream</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    /* Màn hình chờ: lần đầu Flutter phải tải CanvasKit (~1-2 MB) nên nếu không
+       có gì hiện ra, người dùng tưởng app hỏng. Splash tự xoá khi frame đầu
+       tiên vẽ xong (sự kiện `flutter-first-frame`). */
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #0B0C10;
+      color: #E8E9EE;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #splash {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      transition: opacity .35s ease;
+      z-index: 10;
+    }
+    #splash .logo {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+    #splash .logo span { color: #6C5CE7; }
+    #splash .spinner {
+      width: 26px;
+      height: 26px;
+      border: 3px solid rgba(232, 233, 238, .18);
+      border-top-color: #6C5CE7;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    #splash .hint { font-size: 12px; color: #8A8E9B; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      #splash .spinner { animation-duration: 3s; }
+    }
+  </style>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
+  <div id="splash">
+    <div class="logo">Ani<span>Stream</span></div>
+    <div class="spinner"></div>
+    <div class="hint">Đang tải… lần đầu có thể mất 10–20 giây</div>
+  </div>
 
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
+  <script>
+    // Flutter tự bắn sự kiện này khi frame đầu tiên đã vẽ → gỡ splash.
+    // Có timeout dự phòng: nếu vì lý do gì đó không có sự kiện (chặn mạng…),
+    // splash sẽ tự mờ đi sau 25s để không che app vĩnh viễn.
+    (function () {
+      function hide() {
+        var el = document.getElementById('splash');
+        if (!el) return;
+        el.style.opacity = '0';
+        setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 400);
+      }
+      window.addEventListener('flutter-first-frame', hide);
+      setTimeout(hide, 25000);
+    })();
+  </script>
+
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
