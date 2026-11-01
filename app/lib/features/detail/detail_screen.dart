@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/theme.dart';
 import '../../core/models/anime.dart';
+import '../../core/models/episode_title.dart';
 import '../../core/models/genre_vi.dart';
 import '../../core/widgets/net_image.dart';
 import '../../data/anime_repository.dart';
@@ -367,7 +368,11 @@ class _DetailBody extends ConsumerWidget {
                       SnackBar(
                         content: Text(e.airingAt == null
                             ? 'Tập ${e.number} chưa có bản phát chính thức'
-                            : 'Tập ${e.number} phát ${VnTime.countdown(e.airingAt!)}'),
+                            : e.airingAt!.isAfter(DateTime.now())
+                                ? 'Tập ${e.number} chiếu sau '
+                                    '${VnTime.countdown(e.airingAt!)}'
+                                : 'Tập ${e.number} đã chiếu nhưng app chưa có '
+                                    'bản phát miễn phí chính thức'),
                       ),
                     );
                   }
@@ -394,12 +399,13 @@ class _DetailBody extends ConsumerWidget {
                           color: e.playable ? AppTheme.text : AppTheme.muted,
                         ),
                       ),
-                      // Tên tập lấy từ TMDB (đã gọi API với language=vi-VN)
-                      if (e.title.isNotEmpty)
+                      // Tên tập lấy từ TMDB (language=vi-VN). TMDB hay trả
+                      // placeholder "Episode 7" → lọc bỏ, xem episode_title.dart.
+                      if (displayEpisodeTitle(e.title, e.number) != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 3),
                           child: Text(
-                            e.title,
+                            displayEpisodeTitle(e.title, e.number)!,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.center,
@@ -421,7 +427,7 @@ class _DetailBody extends ConsumerWidget {
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
-                            VnTime.countdown(e.airingAt!),
+                            VnTime.airStatus(e.airingAt!),
                             style: const TextStyle(
                                 fontSize: 8.5, color: AppTheme.muted),
                           ),
