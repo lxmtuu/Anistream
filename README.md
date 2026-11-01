@@ -19,7 +19,8 @@
 | 5b | Auth + đồng bộ watchlist đa thiết bị (Supabase Auth) | ⏭ |
 | 6 | Desktop build + submit store | ⏭ |
 | 7 | CI `flutter analyze` + test cho app | ✅ |
-| 8 | Bản web trên GitHub Pages (xem app không cần cài Flutter) | ✅ code xong, ⏳ chờ bật Pages |
+| 8 | Bản web trên GitHub Pages (xem app không cần cài Flutter) | ✅ live |
+| 9 | CI cho Edge Functions (`bash scripts/test_edge.sh`, 13 test) | ✅ |
 
 > Rà soát toàn repo 01/11/2026: xem **`BAO_CAO_RA_SOAT.md`** (6 lỗi thật đã sửa,
 > 5 lỗi TypeScript/Python đã kiểm tra sạch, phần còn tồn đọng + lý do).
@@ -33,7 +34,9 @@
 ├── CHON_MO_HINH.md           5 mô hình + bảng chấm điểm
 ├── chon_mo_hinh.html         bảng chọn tương tác (mở để tự cân lại trọng số)
 ├── anime_sources.md          10 nguồn API anime + cách cập nhật
-├── db/schema.sql             Postgres schema + RLS + view (chạy 1 lần)
+├── db/schema.sql             Postgres schema + RLS + view + trigger auth (chạy 1 lần)
+├── db/migrations/            bản vá idempotent cho DB đã tạo trước đó
+├── CHECKLIST_QA.md           ⭐ 6 điểm kiểm tra APK release trên máy thật
 ├── ingest/                   worker: AniList + YouTube official → Supabase
 ├── supabase/                 Edge Functions: home · search · schedule · anime · push
 ├── app/                      Flutter app (lib/ 20 file) + platform folders đã sẵn
@@ -42,26 +45,33 @@
 ├── tools/                    gen_mock.py · gen_preview.py
 └── scripts/
     ├── preflight.sh          kiểm tra .env + schema + key (anon hay service_role) trước khi ingest
-    ├── test_api.sh           smoke test 4 endpoint
+    ├── test_edge.sh          test logic push bằng Node (không cần Deno)
+    ├── test_api.sh           smoke test các endpoint
     └── setup_app.sh/.ps1     sinh thư mục platform còn thiếu
 ```
 
 ## Chạy từ đầu (theo thứ tự)
 
-```bash
-# 1. Database
-#    → tạo project Supabase → SQL Editor → dán db/schema.sql
+> 👉 **Nếu backend đã dựng xong và bạn chỉ cần nạp dữ liệu + chạy app:**
+> đọc [`BAN_LAM_TIEP.md`](BAN_LAM_TIEP.md) — 6 bước, ~25 phút, có cả cách kiểm chứng.
 
-# 2. Ingest (cần SUPABASE_URL + SUPABASE_SERVICE_KEY trong .env)
-cp .env.example .env
+```bash
+# ✅ BƯỚC 1 + 3 ĐÃ LÀM SẴN trên project thật:
+#    https://snpzrblwiamqtrnifdis.supabase.co  (Singapore, free)
+#    · schema + RLS + view + trigger đã áp; DB đang TRỐNG (chờ ingest)
+#    · 5 Edge Function đã deploy: home · search · schedule · anime · push
+#    · .env ở gốc repo đã điền sẵn URL + service_role key (file bị gitignore)
+#    Chi tiết + bằng chứng test: supabase/README.md §0
+
+# 1+2. Ingest — chạy TỪ MÁY BẠN (sandbox chặn AniList/YouTube), cần mạng thật
 pip install -r ingest/requirements.txt
 bash scripts/preflight.sh           # ← kiểm tra key/schema trước, ~5 giây
 python3 -m ingest.main all          # hoặc thêm --dry-run để test không ghi DB
 
-# 3. Backend
-npm i -g supabase && supabase login && supabase link --project-ref <ref>
-supabase functions deploy home search schedule anime
-bash scripts/test_api.sh https://<ref>.supabase.co/functions/v1
+# 3. Backend — chỉ chạy lại khi sửa code Edge Function
+npm i -g supabase && supabase login && supabase link --project-ref snpzrblwiamqtrnifdis
+supabase functions deploy home search schedule anime push
+bash scripts/test_api.sh https://snpzrblwiamqtrnifdis.supabase.co/functions/v1
 
 # 4. App  (repo ĐÃ có android/ios/web/windows/macos/linux → KHÔNG chạy flutter create)
 cd app
@@ -110,6 +120,7 @@ và để bạn không vướng NĐ 131/2013 hay Điều 225 BLHS. Chi tiết: `
 | Hiểu vì sao chọn mô hình này | `DECISION.md` |
 | Tự cân lại lựa chọn theo ưu tiên của mình | `chon_mo_hinh.html` |
 | Xem UI trước khi build | `app/UI_PREVIEW.html` |
+| Kiểm tra bản release đúng/sai trong 15 phút | `CHECKLIST_QA.md` |
 | Lộ trình 14 tuần + chi phí + sai lầm cần tránh | `LO_TRINH_ANIME_APP.md` |
 | Thêm nguồn dữ liệu anime | `anime_sources.md`, `ingest/README.md` |
 | Hợp đồng API giữa app và backend | `supabase/README.md` §3 |

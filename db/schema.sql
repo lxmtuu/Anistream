@@ -199,13 +199,29 @@ alter table push_subscriptions enable row level security;
 
 -- app ẩn danh (anon key) được tự tạo/sửa dòng CỦA MÌNH (user_id phải null).
 -- Không cho đọc (không có policy select) → không ai liệt kê được token của người khác.
+-- `device_id` là chuỗi 128-bit ngẫu nhiên do app sinh → kiểm tra nó qua header
+-- để người khác KHÔNG sửa được dòng của mình. Chỉ `user_id is null` là quá lỏng:
+-- ai có anon key cũng PATCH được mọi dòng chưa gắn user (tắt thông báo của
+-- người khác, đổi anime_ids...). App gửi header `x-device-id` (push_service.dart).
 drop policy if exists "anon insert own device" on push_subscriptions;
 create policy "anon insert own device" on push_subscriptions
-  for insert with check (user_id is null);
+  for insert with check (
+    user_id is null
+    and device_id = coalesce(
+      nullif(current_setting('request.headers', true), '')::json ->> 'x-device-id', '')
+  );
 
 drop policy if exists "anon update own device" on push_subscriptions;
 create policy "anon update own device" on push_subscriptions
-  for update using (user_id is null) with check (user_id is null);
+  for update using (
+    user_id is null
+    and device_id = coalesce(
+      nullif(current_setting('request.headers', true), '')::json ->> 'x-device-id', '')
+  ) with check (
+    user_id is null
+    and device_id = coalesce(
+      nullif(current_setting('request.headers', true), '')::json ->> 'x-device-id', '')
+  );
 
 drop policy if exists "user own subs" on push_subscriptions;
 create policy "user own subs" on push_subscriptions
@@ -242,6 +258,42 @@ begin
   end loop;
 end $$;
 
+-- ── 9b. TỰ TẠO PROFILE KHI ĐĂNG KÝ ──────────────────────────
+-- `watchlist.user_id` → `profiles(id)` → `auth.users(id)`. Không có trigger này
+-- thì user đăng nhập xong bấm 🔖 sẽ lỗi 23503 (foreign key violates) vì chưa có
+-- dòng `profiles` tương ứng. (Chi tiết: db/migrations/20261101_auth_profile_trigger.sql)
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, display_name, avatar_url, locale)
+  values (
+    new.id,
+    coalesce(
+      nullif(new.raw_user_meta_data->>'full_name', ''),
+      nullif(new.raw_user_meta_data->>'name', ''),
+      nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
+      'Người dùng AniStream'
+    ),
+    nullif(new.raw_user_meta_data->>'avatar_url', ''),
+    coalesce(nullif(new.raw_user_meta_data->>'locale', ''), 'vi')
+  )
+  on conflict (id) do nothing;
+  return new;
+end $$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+insert into public.profiles (id)
+select u.id from auth.users u
+on conflict (id) do nothing;
+
 -- ── 10. RLS (Supabase) ──────────────────────────────────────
 -- Catalog là dữ liệu công khai: chỉ đọc.
 alter table anime            enable row level security;
@@ -252,6 +304,9 @@ alter table watchlist        enable row level security;
 alter table watch_history    enable row level security;
 alter table push_tokens      enable row level security;
 alter table episode_alerts   enable row level security;
+-- ingest_runs: bật RLS, KHÔNG tạo policy → chỉ service_role (cron) đọc/ghi được.
+-- Thiếu dòng này thì ai có anon key cũng đọc/ghi/xoá được bảng audit.
+alter table ingest_runs      enable row level security;
 
 drop policy if exists "catalog read" on anime;
 create policy "catalog read" on anime for select using (is_published);

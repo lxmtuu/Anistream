@@ -23,7 +23,7 @@ Sau 5 lượt, dự án đã có 6 phần: quyết định, ingest, app Flutter,
 | Rủi ro | Mức độ | Cách xử lý |
 |---|---|---|
 | **Chưa ai chạy app lần nào** — có thể sai 5-10 lỗi nhỏ tích lại, sửa một lúc rất mệt | 🔴 cao | Việc 1 (tối nay) |
-| **Chưa có DB thật** — mọi thứ mới chỉ test dry-run | 🔴 cao | Việc 2 |
+| ~~Chưa có DB thật~~ — **đã xong**: DB + 5 API đã deploy và test thật; còn lại là chạy ingest để có dữ liệu | 🟢 | Việc 2 (phần ingest) |
 | **Chưa kiểm chứng "nội dung có đủ hấp dẫn không"** — đây là rủi ro sản phẩm, không phải kỹ thuật | 🟡 | Việc 3 |
 | Thiếu auth, Drift, desktop build, store | 🟢 thấp | Tuần 2–3, không phải bây giờ |
 
@@ -66,21 +66,25 @@ flutter run -d windows    # hoặc desktop
 ## ✅ Việc 2 — Cuối tuần, 2–3 giờ: nối backend thật
 
 ```bash
-# 1. Tạo project Supabase (free) → SQL Editor → dán TOÀN BỘ db/schema.sql → Run
+# ✅ BƯỚC 1 + 3 ĐÃ XONG (làm sẵn trên project thật):
+#    · Project: https://snpzrblwiamqtrnifdis.supabase.co (Singapore, free)
+#    · schema + RLS + view + trigger đã áp; đã test RLS thật (chặn 42501 khi sai device)
+#    · 5 Edge Function đã deploy & smoke-test thật: home · search · schedule · anime · push
+#    · .env đã điền sẵn SUPABASE_URL + SUPABASE_SERVICE_KEY  (file bị gitignore)
+#    Bằng chứng chi tiết: supabase/README.md §0
 
-# 2. Cấu hình ingest
-cp .env.example .env
-#   điền SUPABASE_URL + SUPABASE_SERVICE_KEY (service_role, KHÔNG phải anon)
+> 📖 Từng bước bấm-copy chạy được: **`BAN_LAM_TIEP.md`**
 
+# 2. Cấu hình ingest — CHỈ CÒN VIỆC NÀY (phải chạy trên máy bạn: cần AniList/YouTube)
 pip install -r ingest/requirements.txt
 bash scripts/preflight.sh       # bắt sớm: nhầm anon key, chưa chạy schema.sql, URL sai
 python3 -m ingest.main all      # ~2 phút: lịch phát + catalog + video official
 
-# 3. Deploy API
+# 3. Deploy API — chỉ khi sửa code Edge Function
 npm i -g supabase
-supabase login && supabase link --project-ref <ref>
-supabase functions deploy home search schedule anime
-bash scripts/test_api.sh https://<ref>.supabase.co/functions/v1
+supabase login && supabase link --project-ref snpzrblwiamqtrnifdis
+supabase functions deploy home search schedule anime push
+bash scripts/test_api.sh https://snpzrblwiamqtrnifdis.supabase.co/functions/v1
 
 # 4. Chạy app với backend thật
 cd app
@@ -151,7 +155,7 @@ Với người dùng Việt, đây là yếu tố sống còn (**quan trọng h�
 
 ```
 [ ] 1. Tối nay    — flutter run với mock data (60')     → gửi mình log
-[ ] 2. Cuối tuần  — Supabase + ingest + deploy (2-3h)   → app chạy dữ liệu thật
+[x] 2. Cuối tuần  — Supabase + deploy (xong) · **ingest: bạn chạy** → app có dữ liệu thật
 [ ] 3. Trong tuần — kiểm tra phụ đề tiếng Việt (15')    → có thể đổi hướng nguồn video
 [ ] 4. Tuần sau   — 10 người dùng thật (3 ngày)         → quyết định làm tiếp hay xoay
 ```

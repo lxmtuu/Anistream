@@ -18,3 +18,6 @@ app/build/
 **/GoogleService-Info.plist
 **/firebase_options.dart
 .DS_Store
+
+# build tạm của test edge (transpile TS → JS)
+tests/edge/.build/

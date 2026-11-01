@@ -1,0 +1,47 @@
+name: edge
+
+# Kiểm tra logic thuần của Edge Functions (không cần Deno/Supabase thật).
+# Trước đây phần TS hoàn toàn không có test tự động.
+
+on:
+  push:
+    paths:
+      - "supabase/**"
+      - "tests/edge/**"
+      - "scripts/test_edge.sh"
+      - ".github/workflows/edge.yml"
+  pull_request:
+    paths:
+      - "supabase/**"
+      - "tests/edge/**"
+      - "scripts/test_edge.sh"
+      - ".github/workflows/edge.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: edge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Test logic push (chống spam + chống gửi trùng)
+        run: bash scripts/test_edge.sh
+
+      # Parse toàn bộ TS để bắt lỗi cú pháp/import sai — Deno không có trong runner
+      # nên dùng esbuild; nó không typecheck nhưng bắt được lỗi thật thường gặp.
+      - name: Parse tất cả TS (esbuild)
+        run: |
+          set -e
+          for f in supabase/functions/*/index.ts supabase/functions/_shared/*.ts; do
+            npx --yes esbuild@0.23.1 "$f" --outfile=/dev/null >/dev/null
+            echo "  ✓ $f"
+          done
