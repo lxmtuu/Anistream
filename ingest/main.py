@@ -585,8 +585,16 @@ def job_seasons(DB, limit: int = 80):
         if i % 20 == 0:
             print(f"    … kiểm {i}/{len(rows)}")
 
-    if added:
-        _upsert_media(DB, added)
+    # GHI THEO TỪNG LÔ 25, không gom hết rồi ghi một lần. Ca thật 02/11/2026:
+    # phát hiện ~50 mùa trong 6 phút, rồi bước ghi cuối cùng lỗi PGRST102 → mất
+    # TRẮNG toàn bộ. Ghi dần thì lỗi giữa đường chỉ mất phần còn lại.
+    written = 0
+    for i in range(0, len(added), 25):
+        chunk = added[i:i + 25]
+        _, id_map = _upsert_media(DB, chunk)
+        written += len(id_map) if id_map else len(chunk)
+        if i + 25 < len(added):
+            print(f"    … đã ghi {written}/{len(added)} mùa")
 
     ok = failures == 0 or bool(added)
     DB.log_ingest("anilist", "seasons", ok, len(added),

@@ -155,3 +155,69 @@ class TestUpsert(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNhomTheoBoKhoa(unittest.TestCase):
+    """PGRST102 — "All object keys must match" (lỗi thật 02/11/2026, job E chết).
+
+    Ta cố ý BỎ khoá rỗng khỏi payload để upsert không ghi NULL đè dữ liệu tốt,
+    nên trong 1 lô có row 17 khoá và row 15 khoá. PostgREST từ chối cả request.
+    """
+
+    def test_moi_request_deu_dong_nhat_bo_khoa(self):
+        rows = [
+            {"anilist_id": 1, "slug": "a", "episodes_total": 12, "cover_url": "x"},
+            {"anilist_id": 2, "slug": "b"},                    # thiếu 2 khoá
+            {"anilist_id": 3, "slug": "c", "episodes_total": 13},
+        ]
+        sent = []
+
+        def fake_post(url, **kw):
+            sent.append(kw["json"])
+            return FakeResp(201, [{"anilist_id": r["anilist_id"], "id": r["anilist_id"]}
+                                  for r in kw["json"]])
+
+        db = _db()
+        with patch("ingest.db.requests.post", side_effect=fake_post):
+            out = db.upsert("anime", rows, on_conflict="anilist_id")
+
+        self.assertEqual(len(out), 3, "không được mất row nào")
+        for batch in sent:
+            self.assertEqual(len({frozenset(r) for r in batch}), 1,
+                             f"lô trộn khoá sẽ bị PGRST102: {batch}")
+
+    def test_khong_dien_None_de_lam_day_khoa(self):
+        """San phẳng bằng None = quay lại lỗi ghi NULL đè episodes_total."""
+        rows = [{"anilist_id": 1, "episodes_total": 12}, {"anilist_id": 2}]
+        sent = []
+        db = _db()
+        with patch("ingest.db.requests.post",
+                   side_effect=lambda url, **kw: (sent.append(kw["json"]),
+                                                  FakeResp(201, []))[1]):
+            db.upsert("anime", rows, on_conflict="anilist_id")
+
+        for batch in sent:
+            for r in batch:
+                self.assertNotIn(
+                    "episodes_total",
+                    {k: v for k, v in r.items() if v is None},
+                    "không được thêm episodes_total=None vào row vốn không có",
+                )
+
+    def test_cung_bo_khoa_thi_chi_1_request(self):
+        rows = [{"anilist_id": i, "slug": f"s{i}"} for i in range(5)]
+        db = _db()
+        with patch("ingest.db.requests.post",
+                   return_value=FakeResp(201, [])) as post:
+            db.upsert("anime", rows, on_conflict="anilist_id")
+        self.assertEqual(post.call_count, 1)
+
+    def test_group_by_keys_cua_ingest_episodes(self):
+        """Job A: tập có giờ chiếu thì có `airing_at`, tập không có thì không."""
+        from ingest.db import _group_by_keys
+
+        rows = [{"anime_id": 1, "number": 1, "airing_at": "2026-01-01"},
+                {"anime_id": 1, "number": 2},]
+        groups = _group_by_keys(rows)
+        self.assertEqual(len(groups), 2)
+        self.assertEqual([len(g) for g in groups], [1, 1])

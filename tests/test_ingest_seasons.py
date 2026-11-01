@@ -206,3 +206,47 @@ class TestRelated(unittest.TestCase):
             anilist.prequels(5)
         self.assertEqual([c.args for c in r.call_args_list],
                          [(5, ("SEQUEL",)), (5, ("PREQUEL",))])
+
+
+class TestGhiTheoLo(unittest.TestCase):
+    """Lỗi thật 02/11/2026: phát hiện ~50 mùa rồi bước ghi cuối cùng lỗi
+    PGRST102 ("All object keys must match") → mất TRẮNG toàn bộ."""
+
+    def _run(self, db, n_new):
+        medias = [m(1000 + i, f"Bo {i} Season 2") for i in range(n_new)]
+        with patch.object(anilist, "sequels", return_value=medias), \
+                patch.object(anilist, "prequels", return_value=[]):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                got = ingest_main.job_seasons(db, limit=1)
+        return got, buf.getvalue()
+
+    def test_chia_nhieu_lan_ghi_khi_nhieu_mua(self):
+        db = FakeDB([dict(ROW)])
+        n, out = self._run(db, 60)
+        self.assertEqual(n, 60)
+        anime_upserts = [u for u in db.upserted if u[0] == "anime"]
+        self.assertEqual(len(anime_upserts), 3, "60 mùa → 3 lô 25/25/10")
+        self.assertEqual([len(u[1]) for u in anime_upserts], [25, 25, 10])
+        self.assertIn("đã ghi 25/60", out)
+
+    def test_it_mua_thi_chi_1_lan_ghi(self):
+        db = FakeDB([dict(ROW)])
+        n, _ = self._run(db, 7)
+        self.assertEqual(n, 7)
+        self.assertEqual(len([u for u in db.upserted if u[0] == "anime"]), 1)
+
+    def test_loi_giua_duong_van_giu_phan_da_ghi(self):
+        db = FakeDB([dict(ROW)])
+        calls = {"n": 0}
+
+        def flaky(table, rows, on_conflict=None, fallback_per_row=False):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("PGRST102 giả lập")
+            return db.upsert(table, rows, on_conflict, fallback_per_row)
+
+        db.upsert = flaky
+        with self.assertRaises(RuntimeError):
+            self._run(db, 60)
+        self.assertEqual(calls["n"], 2, "lô 1 phải ghi xong trước khi lô 2 lỗi")
