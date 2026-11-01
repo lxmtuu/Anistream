@@ -208,7 +208,7 @@ Rà lại toàn bộ pipeline, tìm được 4 chỗ ghi/sửa dữ liệu SAI m
 
 | Lỗi | Bằng chứng trên DB thật | Đã sửa |
 |---|---|---|
-| Job A/B gửi khoá `null` khi AniList trả rỗng | **8 bộ có 12–13 tập mà `episodes_total` = NULL**; 126/126 bộ `last_synced_at` = NULL | bỏ khoá rỗng khỏi payload |
+| Job A/B gửi khoá `null` khi AniList trả rỗng | **3 bộ có 12–13 tập đầy đủ mà `episodes_total` = NULL** (khớp giả thuyết bị ghi đè); 126/126 bộ `last_synced_at` = NULL | bỏ khoá rỗng khỏi payload |
 | Job A gửi `title: None` cho mọi tập đang chiếu | xoá tên tập TMDB/Jikan điền (job chạy 30 phút/lần) | bỏ khoá khi rỗng |
 | Đọc PostgREST không phân trang | Supabase cắt ở **1000 dòng** → job C' tưởng bộ sau dòng 1000 "chưa có tập" | `DB.select_all()` |
 | `jikan` bỏ qua bộ đã có ≥1 tập | **33 bộ** thiếu vài tập không bao giờ được lấp | `jikan --fill-gaps` |

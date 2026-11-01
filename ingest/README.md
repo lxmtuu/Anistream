@@ -99,7 +99,7 @@ Rà lại toàn pipeline thấy 4 chỗ hỏng mà **không chỗ nào báo lỗ
 
 | Lỗi | Hậu quả thật trên DB | Bản vá |
 |---|---|---|
-| `to_anime_row` gửi khoá `None` khi AniList trả rỗng | upsert merge-duplicates ghi NULL đè `episodes_total`/`cover_url`/`score` mỗi 30 phút → **8 bộ có 12–13 tập mà `episodes_total` = NULL**, 126/126 bộ `last_synced_at` = NULL | Bỏ khoá rỗng khỏi payload + tự set `last_synced_at` |
+| `to_anime_row` gửi khoá `None` khi AniList trả rỗng | upsert merge-duplicates ghi NULL đè `episodes_total`/`cover_url`/`score` mỗi 30 phút. Đo 02/11: **3 bộ có 12–13 tập đầy đủ (từ TMDB) mà `episodes_total` = NULL** — khớp với việc bị ghi đè; và **126/126 bộ `last_synced_at` = NULL** (chắc chắn, cột không có default) | Bỏ khoá rỗng khỏi payload + tự set `last_synced_at` |
 | `to_episode_row` gửi `title: None` | job A xoá tên tập TMDB/Jikan đã điền | Bỏ khoá khi rỗng (cả ở `tmdb.episode_rows`, `jikan.episode_rows`) |
 | Không phân trang khi đọc PostgREST | Supabase cắt ở **1000 dòng**; `limit=20000` vẫn chỉ 1000 → job C' coi bộ sau dòng 1000 là "chưa có tập", job E báo nhầm "mùa mới" | `DB.select_all()` tự limit+offset, dùng ở C'/E/audit |
 | `jikan` bỏ qua mọi bộ đã có ≥1 tập | 33 bộ thiếu vài tập không bao giờ được lấp | cờ `--fill-gaps` (chỉ thêm số tập còn thiếu) |

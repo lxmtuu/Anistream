@@ -92,6 +92,11 @@ class TestCollect(unittest.TestCase):
         v = qa.collect(FakeDB(ANIME, [], [link(1, 1)]))
         self.assertEqual(v["soft"]["bo_co_link_0_tap"], ["onepunch"])
 
+    def test_bo_chi_co_ban_gop_van_bi_canh_bao(self):
+        """Link episode_number = 0 ("cả bộ") không tạo được tập nào trong DB."""
+        v = qa.collect(FakeDB(ANIME, [], [link(1, 0)]))
+        self.assertEqual(v["soft"]["bo_co_link_0_tap"], ["onepunch"])
+
     def test_dem_bo_khong_biet_tong(self):
         self.assertEqual(qa.collect(FakeDB(ANIME, [], []))["soft"]["bo_khong_biet_tong"], 1)
 

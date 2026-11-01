@@ -67,6 +67,9 @@ def collect(DB) -> Dict[str, Any]:
 
     seen_urls = {}
     link_by_anime: Dict[int, List[int]] = {}
+    # Bộ có link (kể cả chỉ có "bản gộp" episode_number = 0) nhưng bảng tập trống:
+    # app vẫn hiện entry 0, nhưng danh sách tập thật thì rỗng → phải cảnh báo.
+    has_link: Dict[int, bool] = {}
     for l in links:
         aid = l.get("anime_id")
         if aid not in by_id:
@@ -76,6 +79,7 @@ def collect(DB) -> Dict[str, Any]:
         if key in seen_urls and seen_urls[key] != aid:
             hard["url_trung"].append(f"{l.get('url')} → anime {seen_urls[key]} & {aid}")
         seen_urls[key] = aid
+        has_link[aid] = True
         n = l.get("episode_number")
         if isinstance(n, int) and n > 0:
             link_by_anime.setdefault(aid, []).append(n)
@@ -84,7 +88,7 @@ def collect(DB) -> Dict[str, Any]:
         if isinstance(n, int) and isinstance(total, int) and total > 0 and n > total:
             soft["link_vuot_tong"].append(f"{a.get('slug')}: tập {n} > {total}")
 
-    for aid in link_by_anime:
+    for aid in has_link:
         if not eps_by_anime.get(aid):
             soft["bo_co_link_0_tap"].append(by_id[aid].get("slug"))
 
