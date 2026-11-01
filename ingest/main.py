@@ -100,26 +100,21 @@ def job_catalog(DB, pages: int = 2):
 
 
 # ─────────────────────────────────────────────── Job C
-def job_youtube(DB, limit: int = 25, check_embed: bool = True,
-                deep: bool = False, max_per_channel: int = 5000):
-    mode = "BACKFILL toàn bộ kênh (YouTube API)" if deep else "RSS (video mới nhất)"
-    print(f"\n▶ Job C — video official → streaming_links  [{mode}]")
-    videos = youtube.collect(limit_per_channel=limit, check_embed=check_embed,
-                             deep=deep, max_per_channel=max_per_channel)
-    print(f"  · {len(videos)} video dùng được")
+def _link_rows(DB, videos, cache, verbose=True):
+    """Ghép tên → anime rồi tạo rows `streaming_links`. Trả (matched, links, unmatched)."""
+    import re
+    import unicodedata
 
-    cache, matched, unmatched = {}, [], {}
-    links = []
-    for v in videos:
+    def exact_title(value):
+        value = unicodedata.normalize("NFKC", value or "").casefold()
+        return re.sub(r"[^\w]+", " ", value).strip()
+
+    matched, unmatched = [], {}
+    for i, v in enumerate(videos, 1):
         media, confidence, how = match.resolve(
             v["series"], cache, want_series=(v["episode"] > 0))
         # Fuzzy partial matches can confuse entirely different series or seasons.
         # Only editorial aliases or exact full titles are published automatically.
-        import re
-        import unicodedata
-        def exact_title(value):
-            value = unicodedata.normalize("NFKC", value or "").casefold()
-            return re.sub(r"[^\w]+", " ", value).strip()
         title = (media or {}).get("title") or {}
         names = [title.get(k) for k in ("romaji", "english", "native")]
         alias_exists = match.alias_key(v["series"]) in match._ALIASES
@@ -127,17 +122,18 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
         if not media or not (alias_exists or exact):
             unmatched.setdefault(v["series"], 0)
             unmatched[v["series"]] += 1
+            if verbose and i % 50 == 0:
+                print(f"    … ghép tên {i}/{len(videos)}")
             continue
         matched.append((v, media, confidence, how))
 
-    print(f"  · khớp được {len(matched)}/{len(videos)} video "
-          f"({len(unmatched)} tên series chưa khớp)")
+    if not matched:
+        return [], [], unmatched
 
-    # 1) upsert anime trước để có id
+    # upsert anime trước để có id
     rows, id_map = _upsert_media(DB, [m for _, m, _, _ in matched])
 
-    # 2) tạo links
-    seen_url = set()
+    links, seen_url = [], set()
     for v, media, conf, how in matched:
         # dry-run chưa có id thật → dùng anilist_id làm chỗ giữ để đếm cho đúng
         aid = id_map.get(media["id"]) or (media["id"] if DB.dry else None)
@@ -154,26 +150,104 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
             "is_verified": True,
             "verified_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         })
+    return rows, links, unmatched
 
-    if DB.dry:
-        print(f"  [dry-run] sẽ upsert {len(links)} streaming_links")
-        for v, media, conf, how in matched[:14]:
-            t = (media.get("title") or {}).get("romaji", "")
-            print(f"    ep{str(v['episode']).rjust(3)}  {conf:.2f} {how:<10} "
-                  f"{v['series'][:30]:<30} → {t[:32]}")
-    else:
-        DB.upsert("streaming_links", links,
-                  on_conflict="anime_id,platform,region,episode_number",
-                  fallback_per_row=True)
 
-    if unmatched:
-        print("  ⚠ chưa khớp (cần map tay trong bảng platform_map / alias):")
-        for name, n in list(unmatched.items())[:10]:
-            print(f"      - {name}  ({n} video)")
+def job_youtube(DB, limit: int = 25, check_embed: bool = True,
+                deep: bool = False, max_per_channel: int = 5000,
+                use_cache: bool = True, only_channel: str = ""):
+    """Video official → streaming_links.
 
-    DB.log_ingest("youtube", "links", True, len(links))
-    print(f"  ✓ {len(rows)} anime · {len(links)} links")
-    return len(links)
+    Khác bản cũ ở 3 điểm (đều là lỗi thật gặp khi backfill 5.560 video):
+      1. GHI DB THEO TỪNG KÊNH — bản cũ gom cả 2 kênh rồi ghi một lần, nên mất
+         mạng/Ctrl+C ở khâu ghép tên là mất trắng, `ingest_runs` không có dấu vết.
+      2. CACHE GHÉP TÊN RA ĐĨA (`.cache/match_cache.json`) — chạy lại thì bỏ qua
+         tên đã biết, không search lại 4 request/tên.
+      3. LỖI ĐƯỢC GHI LẠI: kênh nào hỏng thì các kênh khác vẫn ghi, và
+         `ingest_runs` ghi ok=false kèm lý do.
+    """
+    mode = "BACKFILL toàn bộ kênh (YouTube API)" if deep else "RSS (video mới nhất)"
+    print(f"\n▶ Job C — video official → streaming_links  [{mode}]")
+
+    cache = match.load_disk_cache() if use_cache else {}
+    if use_cache and cache:
+        known = sum(1 for v in cache.values() if v)
+        print(f"  · cache ghép tên: {len(cache)} tên "
+              f"({known} đã khớp, {len(cache) - known} đã biết là không khớp)")
+
+    channels = [c for c in youtube.CHANNELS if not only_channel or c["key"] == only_channel]
+    if not channels:
+        raise RuntimeError(f"không có kênh nào khớp --channel={only_channel}")
+
+    total_rows = total_links = 0
+    all_unmatched = {}
+    failures = []
+
+    for n, ch in enumerate(channels, 1):
+        print(f"\n  ── Kênh {n}/{len(channels)}: {ch['name']} ──")
+        try:
+            videos = youtube.collect_channel(
+                ch, limit_per_channel=limit, check_embed=check_embed,
+                deep=deep, max_per_channel=max_per_channel)
+        except Exception as e:
+            print(f"  ✗ không lấy được video {ch['name']}: {type(e).__name__}: {e}")
+            failures.append(f"{ch['name']}: {e}")
+            continue
+
+        print(f"  · {len(videos)} video dùng được")
+        if not videos:
+            continue
+
+        try:
+            rows, links, unmatched = _link_rows(DB, videos, cache)
+        except Exception as e:
+            print(f"  ✗ lỗi khi ghép tên/ghi {ch['name']}: {type(e).__name__}: {e}")
+            failures.append(f"{ch['name']}: {e}")
+            if use_cache:
+                match.save_disk_cache(cache)
+            continue
+
+        for name, cnt in unmatched.items():
+            all_unmatched[name] = all_unmatched.get(name, 0) + cnt
+
+        print(f"  · khớp được {sum(1 for _ in links)}/{len(videos)} video "
+              f"({len(unmatched)} tên series chưa khớp)")
+
+        if DB.dry:
+            print(f"  [dry-run] sẽ upsert {len(links)} streaming_links")
+        elif links:
+            DB.upsert("streaming_links", links,
+                      on_conflict="anime_id,platform,region,episode_number",
+                      fallback_per_row=True)
+            print(f"  ✓ đã ghi {len(links)} link / {len(rows)} anime (kênh {ch['name']})")
+
+        total_rows += len(rows)
+        total_links += len(links)
+
+        if use_cache:
+            path = match.save_disk_cache(cache)
+            print(f"  · đã lưu cache {len(cache)} tên → {path}")
+
+    if all_unmatched:
+        print(f"\n  ⚠ {len(all_unmatched)} tên series chưa khớp "
+              f"(thêm vào ingest/aliases.json rồi chạy lại):")
+        for name, cnt in sorted(all_unmatched.items(), key=lambda x: -x[1])[:15]:
+            print(f"      - {name}  ({cnt} video)")
+
+    ok = not failures
+    DB.log_ingest("youtube", "links", ok, total_links,
+                  error="; ".join(failures)[:500])
+    print(f"  ✓ tổng: {total_rows} anime · {total_links} links")
+    if failures:
+        # NỔ, không im lặng: cron "xanh" mà không lấy được video nào là loại lỗi
+        # tệ nhất — các kênh khác đã ghi xong nên dữ liệu không mất, nhưng lần
+        # chạy này PHẢI đỏ để người vận hành biết mà sửa.
+        print(f"\n  ✗ {len(failures)} kênh lỗi (các kênh khác vẫn đã ghi):")
+        for f in failures:
+            print(f"      - {f}")
+        raise RuntimeError(f"{len(failures)}/{len(channels)} kênh không lấy được video: "
+                           + "; ".join(failures)[:300])
+    return total_links
 
 
 # ─────────────────────────────────────────────── Job D
@@ -300,6 +374,10 @@ def main(argv=None):
                     help="lấy TOÀN BỘ lịch sử kênh (cần YOUTUBE_API_KEY)")
     ap.add_argument("--limit-tmdb", type=int, default=60,
                     help="số anime làm giàu mỗi lần chạy job TMDB")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="bỏ qua .cache/match_cache.json (ghép lại tên từ đầu)")
+    ap.add_argument("--channel", default="",
+                    help="chỉ xử lý 1 kênh (muse_vn | ani_one_asia)")
     ap.add_argument("--max-videos", type=int, default=5000,
                     help="giới hạn số video mỗi kênh khi --deep")
     args = ap.parse_args(argv)
@@ -325,7 +403,9 @@ def main(argv=None):
             total += job_catalog(DB, args.pages)
         if args.command in ("youtube", "all"):
             total += job_youtube(DB, args.limit, not args.no_embed_check,
-                                 deep=args.deep, max_per_channel=args.max_videos)
+                                 deep=args.deep, max_per_channel=args.max_videos,
+                                 use_cache=not args.no_cache,
+                                 only_channel=args.channel)
         if args.command == "tmdb":
             total += job_tmdb(DB, args.limit_tmdb)
         elif args.command == "all":

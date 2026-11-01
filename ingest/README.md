@@ -99,6 +99,36 @@ tự động loại shorts/clip (< 4 phút) chính xác hơn nhiều so với đ
 
 Sau lần backfill đầu, cron 6h chỉ cần chạy `youtube` (không `--deep`) để bắt tập mới.
 
+### Backfill an toàn: ghi theo từng kênh + cache ra đĩa
+
+Bản đầu gom video **cả 2 kênh** rồi mới ghép tên và ghi DB một lần. Hệ quả thật
+gặp phải: 5.560 video được tải về, tới khâu ghép tên thì AniList trả 429 liên tục
+(`… AniList rate limit, đợi 38s` lặp mãi) → **không ghi được dòng nào**, và
+`ingest_runs` không có dấu vết. Nay:
+
+| Cơ chế | Chi tiết |
+|---|---|
+| Ghi theo từng kênh | Xong kênh nào ghi kênh đó → hỏng kênh 2 không mất kênh 1 |
+| Cache ghép tên | `.cache/match_cache.json` (tự sinh, đã gitignore). Chạy lại **không** search lại tên đã biết |
+| Cache âm | Tên từng không khớp cũng được nhớ → không tốn 4 request lại |
+| Sửa `aliases.json` | Cache phát hiện file đổi (`aliases_mtime`) → **bỏ mục âm**, thử lại tên vừa thêm alias |
+| Giãn nhịp AniList | `MIN_INTERVAL` 1.0s/request; gặp 429 thì tăng ×1.5 (trần 6s) và ngủ theo `Retry-After` |
+| Lỗi → **đỏ** | Kênh nào lỗi thì cuối job **ném lỗi** (exit ≠ 0) + `ingest_runs(ok=false, error=…)`, không "xanh mà không chạy" |
+
+Chạy tiếp / chạy từng kênh:
+
+```bash
+python3 -m ingest.main youtube --deep --limit 200 --channel muse_vn   # 1 kênh
+python3 -m ingest.main youtube --deep --limit 200                     # chạy tiếp cả 2
+python3 -m ingest.main youtube --deep --limit 200 --no-cache          # ghép lại từ đầu
+ANILIST_MIN_INTERVAL=2 python3 -m ingest.main youtube --deep          # chậm hơn, ít bị 429
+rm -rf .cache                                                         # xoá cache hoàn toàn
+```
+
+Lần đầu: tên chưa có trong cache → mỗi tên tốn 1–4 request × ~1–6s. Vài trăm tên
+là **10–30 phút**; nhìn `… ghép tên 50/480` để biết đang chạy. Muốn nhanh hơn
+nhiều thì thêm alias tay: mỗi alias trong `aliases.json` là **0 request**.
+
 ### Thêm kênh mới
 Lấy `channel_id` (không phải `@handle`):
 ```bash

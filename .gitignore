@@ -6,6 +6,9 @@
 !**/.env.example
 __pycache__/
 *.pyc
+
+# cache ghép tên của ingest (tự sinh, không commit)
+.cache/
 .dart_tool/
 build/
 
