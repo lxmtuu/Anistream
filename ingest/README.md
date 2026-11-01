@@ -58,7 +58,7 @@ Quy tắc **thà thiếu còn hơn sai**:
 Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API Key (v3)**.
 ⚠️ Không dùng "Read Access Token (v4)" — code gọi bằng `api_key`.
 
-## 9 job ingest
+## 10 job ingest
 
 | Job | Lệnh | Nguồn | Chạy |
 |---|---|---|---|
@@ -71,8 +71,28 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 | E | `seasons` | AniList `relations` → **mùa thiếu** (SEQUEL + PREQUEL) | hằng ngày |
 | F | `jikan` | Jikan/MAL → lấp tập còn thiếu (`--fill-gaps`: cả bộ thiếu vài tập) | hằng ngày |
 | G | `check` | **kiểm bất biến dữ liệu**, vi phạm cứng → job ĐỎ | hằng ngày |
+| H | `reassign` | chuyển link bị gán **sai mùa** sang đúng mùa | chạy tay |
 
-`all` = A + B + C + C' + D + D' + E + F + G.
+`all` = A + B + C + C' + D + D' + E + F + G. (`reassign` chạy tay — xem dưới.)
+
+### Job H — `reassign`: link bị gán sai mùa
+
+Muse đánh số tập **tiếp nối qua các mùa**: FAIRY TAIL đăng liên tục tập 1–277,
+nhưng AniList tách "FAIRY TAIL" (175) và "FAIRY TAIL (2014)" (102). Ingest gán cả
+277 video vào entry mùa 1 → 102 link vượt tổng bị chốt chặn loại ⇒ **102 video
+không ai xem được** (mùa 1 hiện 66 tập trong khi Muse có 277).
+
+```bash
+python3 -m ingest.reassign                 # chỉ in kế hoạch
+python3 -m ingest.reassign --apply --only-exact   # an toàn nhất
+python3 -m ingest.reassign --apply         # gồm cả ca "probable"
+```
+
+Quy tắc rất bảo thủ: offset = `episodes_total` của bộ cũ; đích phải là mùa sau
+theo slug và **chưa có link/tập nào**; mọi link phải ánh xạ vào `[1, tổng của
+đích]`; `exact` khi dãy số liên tục và khớp đúng tổng của đích. Ca không có entry
+mùa sau (HUNTER×HUNTER 63–148, DB chỉ có bản 62 tập) thì **để nguyên và báo**, còn
+hơn gán bừa sang bộ khác.
 
 ### Vì sao cần D' và E (2 lỗi cũ)
 
