@@ -75,6 +75,7 @@ RSS chỉ trả **15 video mới nhất/kênh** → mỗi bộ chỉ có 1–4 t
 ```bash
 # 1. Tạo key free (2 phút): console.cloud.google.com → enable "YouTube Data API v3"
 #    → Credentials → Create credentials → API key
+#    Kiểm key trước khi chạy:  bash scripts/check_keys.sh
 # 2. Thêm vào .env
 YOUTUBE_API_KEY=AIza...
 

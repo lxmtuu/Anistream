@@ -47,6 +47,7 @@
     ├── preflight.sh          kiểm tra .env + schema + key (anon hay service_role) trước khi ingest
     ├── test_edge.sh          test logic push bằng Node (không cần Deno)
     ├── check_cron.sh         cron GitHub có THẬT SỰ chạy? (exit 1 = chết)
+    ├── check_keys.sh         kiểm TMDB/YouTube key (nói rõ sai ở đâu)
     ├── test_api.sh           smoke test các endpoint
     └── setup_app.sh/.ps1     sinh thư mục platform còn thiếu
 ```

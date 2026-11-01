@@ -18,6 +18,7 @@ APIs & Services → Library → "YouTube Data API v3" → Enable →
 Credentials → Create credentials → API key. Rồi thêm vào .env:
     YOUTUBE_API_KEY=AIza...
 """
+import json
 import re
 from typing import Dict, List, Optional
 
@@ -49,7 +50,71 @@ def parse_iso8601_duration(value: str) -> int:
     return d * 86400 + h * 3600 + mi * 60 + s
 
 
+# 3 lỗi gặp nhiều nhất khi mới tạo key, mỗi lỗi cần một cách xử lý KHÁC nhau.
+# Google chỉ trả JSON `error.errors[0].reason`, không nói tiếng Việt — nên dịch.
+_KEY_ERRORS = {
+    "keyInvalid": (
+        "API key không hợp lệ. Sao chép lại key ở Google Cloud Console → "
+        "APIs & Services → Credentials (đừng copy thừa dấu cách/xuống dòng)."
+    ),
+    "API_KEY_INVALID": "API key không hợp lệ (kiểm lại chuỗi key).",
+    "accessNotConfigured": (
+        "Dự án CHƯA BẬT \"YouTube Data API v3\". Vào console.cloud.google.com → "
+        "APIs & Services → Library → tìm \"YouTube Data API v3\" → Enable. "
+        "Đợi ~1 phút rồi chạy lại (key cũ vẫn dùng được, không cần tạo key mới)."
+    ),
+    "SERVICE_DISABLED": (
+        "API chưa được bật cho dự án này → Library → \"YouTube Data API v3\" → Enable."
+    ),
+    "quotaExceeded": (
+        "Hết quota 10.000 unit/ngày (reset 00:00 giờ Thái Bình Dương). "
+        "Chạy lại sau, hoặc bỏ cờ --deep cho lần chạy này."
+    ),
+    "dailyLimitExceeded": "Hết quota ngày hôm nay — chạy lại sau (reset 00:00 PT).",
+    "ipRefererBlocked": (
+        "Key bị giới hạn theo IP/referrer. Sửa ở Credentials → chọn key → "
+        "Application restrictions → None (hoặc thêm IP máy bạn)."
+    ),
+    "forbidden": "Bị từ chối (403). Kiểm tra key + xem API đã bật chưa.",
+}
+
+
+def _explain_error(status: int, body: str) -> str:
+    """Đổi body lỗi JSON của Google thành câu người đọc hiểu được."""
+    reason, message = "", ""
+    try:
+        err = (json.loads(body).get("error") or {})
+        message = err.get("message") or ""
+        errs = err.get("errors") or []
+        if errs:
+            reason = errs[0].get("reason") or ""
+        if not reason:
+            reason = err.get("status") or ""
+    except Exception:
+        pass
+
+    hint = _KEY_ERRORS.get(reason)
+    if not hint:
+        low = f"{reason} {message}".lower()
+        for k, v in _KEY_ERRORS.items():
+            if k.lower() in low:
+                hint = v
+                break
+    if not hint:
+        hint = "Xem chi tiết ở body bên dưới (thường gặp: key sai, chưa bật API, hết quota)."
+    return f"YouTube API lỗi {status} [{reason or 'unknown'}]: {hint}\n  body: {body[:300]}"
+
+
 def _get(path: str, **params) -> Dict:
+    if not config.YOUTUBE_API_KEY:
+        raise RuntimeError(
+            "Thiếu YOUTUBE_API_KEY.\n"
+            "  → Lấy key miễn phí: https://console.cloud.google.com → New project →\n"
+            "    APIs & Services → Library → \"YouTube Data API v3\" → Enable →\n"
+            "    Credentials → Create credentials → API key\n"
+            "  → Thêm vào .env:  YOUTUBE_API_KEY=AIza...\n"
+            "  → Không có key thì bỏ cờ --deep (chỉ dùng RSS: 15 video/kênh)."
+        )
     params["key"] = config.YOUTUBE_API_KEY
     r = requests.get(
         f"{API}/{path}",
@@ -58,7 +123,7 @@ def _get(path: str, **params) -> Dict:
         timeout=config.HTTP_TIMEOUT,
     )
     if r.status_code != 200:
-        raise RuntimeError(f"YouTube API {path} → {r.status_code}: {r.text[:300]}")
+        raise RuntimeError(_explain_error(r.status_code, r.text))
     return r.json()
 
 

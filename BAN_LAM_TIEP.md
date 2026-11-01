@@ -16,6 +16,7 @@
 | 4 | Kiểm chứng bằng số | 2' | ✅ |
 | 5 | Chạy app với dữ liệu thật | 10' | ✅ |
 | 5b | Tiếng Việt + danh sách tập (TMDB) | 5' | ⚙️ nên làm |
+| 5c | Nhiều tập hơn mỗi bộ (YouTube API) | 5' | ⚙️ nên làm |
 | 6 | Bật thông báo đẩy + tự động hoá | 20' | ⚙️ tuỳ chọn |
 
 ---
@@ -168,6 +169,56 @@ không đoán bừa. Chi tiết quy tắc: `ingest/README.md` § Job D.
 
 > Muốn job D chạy tự động hằng ngày: thêm `TMDB_API_KEY` vào GitHub secrets
 > (Settings → Secrets → Actions). Không có key thì job D tự bỏ qua kèm cảnh báo.
+
+## Bước 3d — Nhiều tập hơn cho mỗi bộ (YouTube Data API, 5 phút)
+
+Hiện 4/5 bộ "miễn phí" chỉ có **1 tập** (bộ kia có 6). Nguyên nhân: RSS chỉ trả
+**15 video mới nhất** mỗi kênh. Có key thì backfill **toàn bộ lịch sử** kênh.
+
+**Lấy key (miễn phí, 10.000 unit/ngày — index được ~150.000 video):**
+
+1. https://console.cloud.google.com → góc trên **New Project** → đặt tên bất kỳ → **Create**
+   (đợi ~10 giây cho project được tạo, kiểm tra tên project đã hiện ở thanh trên cùng)
+2. Menu ☰ → **APIs & Services** → **Library**
+3. Ô tìm kiếm gõ **YouTube Data API v3** → bấm vào → nút **Enable** (đợi ~1 phút)
+4. Menu ☰ → **APIs & Services** → **Credentials**
+   → **+ Create credentials** → **API key** → key hiện ra (`AIza…`) → **Copy**
+5. Dán vào `.env`:
+
+```bash
+echo 'YOUTUBE_API_KEY=AIza...' >> .env      # hoặc sửa trực tiếp bằng editor
+```
+
+6. Kiểm key trước khi chạy (bắt đúng lỗi: key sai / chưa bật API / hết quota):
+
+```bash
+bash scripts/check_keys.sh          # phải thấy: ✅ YouTube key dùng được
+```
+
+7. Backfill **một lần**:
+
+```bash
+python3 -m ingest.main youtube --deep --limit 200
+```
+
+**Kỳ vọng:** log ghi `BACKFILL toàn bộ kênh (YouTube API)` thay vì `RSS`, và số link
+tăng lên nhiều. Kiểm:
+
+```sql
+select count(distinct anime_id) from streaming_links where kind='free_legal' and is_verified;
+select count(*) from streaming_links where kind='free_legal' and is_verified;
+```
+
+**3 lỗi hay gặp** (script `check_keys.sh` phân biệt được từng cái):
+
+| Triệu chứng | Nguyên nhân | Sửa |
+|---|---|---|
+| `keyInvalid` | copy thiếu/thừa ký tự | copy lại ở Credentials |
+| `accessNotConfigured` | **quên bấm Enable** ở bước 3 | Library → YouTube Data API v3 → Enable, đợi 1 phút (key cũ vẫn dùng) |
+| `quotaExceeded` | hết 10.000 unit hôm nay | chờ reset 00:00 giờ Thái Bình Dương |
+| `ipRefererBlocked` | key bị giới hạn IP | Credentials → key → Application restrictions → **None** |
+
+> Không bắt buộc phải có key: bỏ `--deep` thì chỉ dùng RSS như cũ.
 
 ## Bước 4 — Kiểm chứng bằng số (2 phút)
 
