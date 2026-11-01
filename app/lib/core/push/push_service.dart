@@ -12,8 +12,11 @@ import '../../app/env.dart';
 /// Đăng ký nhận thông báo "tập mới vừa ra" + mở đúng màn hình khi bấm.
 ///
 /// Thiết kế:
-///  • **Không cần đăng nhập**: mỗi thiết bị có `device_id` ngẫu nhiên lưu cục bộ;
-///    backend lưu (device_id, token, anime_ids) trong bảng `push_subscriptions`.
+///  • **Không cần đăng nhập**: mỗi thiết bị có `device_id` ngẫu nhiên (128-bit,
+///    sinh bằng Random.secure) lưu cục bộ; backend lưu (device_id, token,
+///    anime_ids) trong bảng `push_subscriptions`.
+///  • Mọi lệnh ghi gửi kèm header `x-device-id`: RLS chỉ cho thiết bị đó sửa
+///    đúng dòng của mình (xem `db/schema.sql` phần 7d).
 ///  • Danh sách bộ muốn nhận tin = **watchlist** của người dùng → gọi
 ///    [syncSubscriptions] mỗi khi watchlist thay đổi.
 ///  • Toàn bộ nằm trong try/catch: chưa cấu hình Firebase thì app **vẫn chạy bình thường**,
@@ -146,6 +149,9 @@ class PushService {
             'Authorization': 'Bearer ${Env.anonKey}',
             'Content-Type': 'application/json',
             'Prefer': 'resolution=merge-duplicates,return=minimal',
+            // RLS yêu cầu header này khớp cột `device_id` — nếu thiếu, Postgres
+            // từ chối (fail-closed) để người khác không sửa được dòng của mình.
+            'x-device-id': _deviceId!,
           },
         ),
       );
@@ -168,6 +174,7 @@ class PushService {
             'apikey': Env.anonKey,
             'Authorization': 'Bearer ${Env.anonKey}',
             'Prefer': 'return=minimal',
+            'x-device-id': _deviceId ?? '',
           },
         ),
       );

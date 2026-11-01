@@ -33,7 +33,9 @@
 ├── CHON_MO_HINH.md           5 mô hình + bảng chấm điểm
 ├── chon_mo_hinh.html         bảng chọn tương tác (mở để tự cân lại trọng số)
 ├── anime_sources.md          10 nguồn API anime + cách cập nhật
-├── db/schema.sql             Postgres schema + RLS + view (chạy 1 lần)
+├── db/schema.sql             Postgres schema + RLS + view + trigger auth (chạy 1 lần)
+├── db/migrations/            bản vá idempotent cho DB đã tạo trước đó
+├── CHECKLIST_QA.md           ⭐ 6 điểm kiểm tra APK release trên máy thật
 ├── ingest/                   worker: AniList + YouTube official → Supabase
 ├── supabase/                 Edge Functions: home · search · schedule · anime · push
 ├── app/                      Flutter app (lib/ 20 file) + platform folders đã sẵn
@@ -51,6 +53,9 @@
 ```bash
 # 1. Database
 #    → tạo project Supabase → SQL Editor → dán db/schema.sql
+#      (schema.sql đã gồm cả trigger tạo `profiles` khi đăng ký + RLS siết cho push.
+#       Nếu bạn đã chạy schema.sql từ trước: chạy thêm
+#       db/migrations/20261101_auth_profile_trigger.sql)
 
 # 2. Ingest (cần SUPABASE_URL + SUPABASE_SERVICE_KEY trong .env)
 cp .env.example .env
@@ -110,6 +115,7 @@ và để bạn không vướng NĐ 131/2013 hay Điều 225 BLHS. Chi tiết: `
 | Hiểu vì sao chọn mô hình này | `DECISION.md` |
 | Tự cân lại lựa chọn theo ưu tiên của mình | `chon_mo_hinh.html` |
 | Xem UI trước khi build | `app/UI_PREVIEW.html` |
+| Kiểm tra bản release đúng/sai trong 15 phút | `CHECKLIST_QA.md` |
 | Lộ trình 14 tuần + chi phí + sai lầm cần tránh | `LO_TRINH_ANIME_APP.md` |
 | Thêm nguồn dữ liệu anime | `anime_sources.md`, `ingest/README.md` |
 | Hợp đồng API giữa app và backend | `supabase/README.md` §3 |

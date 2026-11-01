@@ -67,6 +67,7 @@ flutter run -d windows    # hoặc desktop
 
 ```bash
 # 1. Tạo project Supabase (free) → SQL Editor → dán TOÀN BỘ db/schema.sql → Run
+#    (đã gồm trigger tạo profiles khi đăng ký + RLS siết cho push_subscriptions)
 
 # 2. Cấu hình ingest
 cp .env.example .env
