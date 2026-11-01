@@ -168,16 +168,22 @@ khi bật thật.
 ## 7. Chạy với backend thật (trước khi gửi cho 10 người)
 
 ```bash
-# trên máy tính, sau khi đã điền .env + chạy schema.sql
+# DB + 5 Edge Function đã deploy sẵn (xem supabase/README.md §0).
+# Ở đây chỉ còn: nạp dữ liệu thật + build app trỏ vào backend thật.
 bash scripts/preflight.sh
 python3 -m ingest.main all
+
+# kiểm nhanh API sau khi ingest (0 → phải có số > 0)
+BASE=https://snpzrblwiamqtrnifdis.supabase.co/functions/v1
+curl -s "$BASE/home" | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print(len(d['anime']), 'anime /', len(d['shelves']), 'shelf')"
+curl -s "$BASE/search?q=a&page=2" | head -c 120   # phải là 200 + items:[] (KHÔNG được 500)
 
 # build app trỏ vào backend thật
 cd app
 flutter build apk --release \
   --dart-define=USE_MOCK=false \
-  --dart-define=API_BASE=https://<ref>.supabase.co/functions/v1 \
-  --dart-define=ANON_KEY=<anon key>
+  --dart-define=API_BASE=https://snpzrblwiamqtrnifdis.supabase.co/functions/v1 \
+  --dart-define=ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNucHpyYmx3aWFtcXRybmlmZGlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM1MjQyOTEsImV4cCI6MjEwOTEwMDI5MX0.TJIm0tDjXk82ZCIQbVgKk4EMq30vmdA-LmsaTWaIkZY
 ```
 ⚠️ Chỉ dùng **anon key** trong app. Không bao giờ nhúng `service_role`.
 

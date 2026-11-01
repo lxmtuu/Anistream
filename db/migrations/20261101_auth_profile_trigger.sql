@@ -61,7 +61,7 @@ create policy "anon insert own device" on push_subscriptions
   for insert with check (
     user_id is null
     and device_id = coalesce(
-      current_setting('request.headers', true)::json ->> 'x-device-id', '')
+      nullif(current_setting('request.headers', true), '')::json ->> 'x-device-id', '')
   );
 
 drop policy if exists "anon update own device" on push_subscriptions;
@@ -69,12 +69,17 @@ create policy "anon update own device" on push_subscriptions
   for update using (
     user_id is null
     and device_id = coalesce(
-      current_setting('request.headers', true)::json ->> 'x-device-id', '')
+      nullif(current_setting('request.headers', true), '')::json ->> 'x-device-id', '')
   ) with check (
     user_id is null
     and device_id = coalesce(
-      current_setting('request.headers', true)::json ->> 'x-device-id', '')
+      nullif(current_setting('request.headers', true), '')::json ->> 'x-device-id', '')
   );
+
+-- ── (3) ingest_runs cần RLS ────────────────────────────────
+-- Bảng audit của cron nằm trong schema `public` nên PostgREST cho phép truy cập
+-- bằng anon key nếu không bật RLS. Không tạo policy nào → chỉ service_role vào được.
+alter table public.ingest_runs enable row level security;
 
 -- Không có policy SELECT: không ai đọc được token của người khác.
 -- App phải gửi kèm header `x-device-id` cho mọi lệnh ghi (xem push_service.dart).

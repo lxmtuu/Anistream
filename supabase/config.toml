@@ -1,8 +1,8 @@
 # Supabase CLI config — chỉ khai báo phần Edge Functions.
 # Chạy local:  supabase start && supabase functions serve --env-file ./supabase/.env
-# Deploy:      supabase functions deploy home search schedule anime
+# Deploy:      supabase functions deploy home search schedule anime push
 
-project_id = "anistream"
+project_id = "anistream"   # ref thật: snpzrblwiamqtrnifdis (đã deploy 2026-11-01)
 
 # Catalog là dữ liệu CÔNG KHAI → không cần JWT.
 # (Nếu để mặc định true, client phải gửi Authorization: Bearer <anon key> — app có gửi,

@@ -208,7 +208,7 @@ create policy "anon insert own device" on push_subscriptions
   for insert with check (
     user_id is null
     and device_id = coalesce(
-      current_setting('request.headers', true)::json ->> 'x-device-id', '')
+      nullif(current_setting('request.headers', true), '')::json ->> 'x-device-id', '')
   );
 
 drop policy if exists "anon update own device" on push_subscriptions;
@@ -216,11 +216,11 @@ create policy "anon update own device" on push_subscriptions
   for update using (
     user_id is null
     and device_id = coalesce(
-      current_setting('request.headers', true)::json ->> 'x-device-id', '')
+      nullif(current_setting('request.headers', true), '')::json ->> 'x-device-id', '')
   ) with check (
     user_id is null
     and device_id = coalesce(
-      current_setting('request.headers', true)::json ->> 'x-device-id', '')
+      nullif(current_setting('request.headers', true), '')::json ->> 'x-device-id', '')
   );
 
 drop policy if exists "user own subs" on push_subscriptions;
@@ -304,6 +304,9 @@ alter table watchlist        enable row level security;
 alter table watch_history    enable row level security;
 alter table push_tokens      enable row level security;
 alter table episode_alerts   enable row level security;
+-- ingest_runs: bật RLS, KHÔNG tạo policy → chỉ service_role (cron) đọc/ghi được.
+-- Thiếu dòng này thì ai có anon key cũng đọc/ghi/xoá được bảng audit.
+alter table ingest_runs      enable row level security;
 
 drop policy if exists "catalog read" on anime;
 create policy "catalog read" on anime for select using (is_published);

@@ -15,11 +15,13 @@ OUT="tests/edge/.build"
 mkdir -p "$OUT"
 
 echo "▶ Transpile TS → JS (esbuild)"
-npx --yes esbuild@0.23.1 \
-  supabase/functions/_shared/push_plan.ts \
-  --bundle --format=esm --platform=neutral \
-  --outfile="$OUT/push_plan.mjs" >/dev/null
-echo "  ✓ $OUT/push_plan.mjs"
+for f in push_plan query; do
+  npx --yes esbuild@0.23.1 \
+    "supabase/functions/_shared/$f.ts" \
+    --bundle --format=esm --platform=neutral \
+    --outfile="$OUT/$f.mjs" >/dev/null
+  echo "  ✓ $OUT/$f.mjs"
+done
 
 echo "▶ node --test"
 node --test tests/edge/*.test.mjs

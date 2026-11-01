@@ -14,7 +14,12 @@ import {
   LinkRow,
   toAnimeDto,
 } from "../_shared/assemble.ts";
-import { ilikeSafe, resolveSort, toInt } from "../_shared/query.ts";
+import {
+  ilikeSafe,
+  isRangeNotSatisfiable,
+  resolveSort,
+  toInt,
+} from "../_shared/query.ts";
 
 Deno.serve(
   withGuard(async (req: Request) => {
@@ -36,39 +41,54 @@ Deno.serve(
 
     const sb = adminClient();
     const from = (page - 1) * limit;
+    const like = q ? `%${ilikeSafe(q)}%` : null;
 
-    let query = sb
-      .from("anime")
-      .select(
-        "id, slug, title_romaji, title_english, title_vi, title_native, cover_url, " +
-          "banner_url, year, season, status, format, episodes_total, score, " +
-          "popularity, genres, synopsis_vi",
-        { count: "exact" },
-      )
-      .eq("is_published", true);
+    // Builder của supabase-js chỉ dùng được MỘT lần → gói phần filter vào hàm để
+    // dựng lại khi cần đếm tổng (nhánh trang vượt quá cuối).
+    const buildQuery = (head = false) => {
+      let b = sb
+        .from("anime")
+        .select(
+          "id, slug, title_romaji, title_english, title_vi, title_native, cover_url, " +
+            "banner_url, year, season, status, format, episodes_total, score, " +
+            "popularity, genres, synopsis_vi",
+          { count: "exact", head },
+        )
+        .eq("is_published", true);
+      if (like) {
+        b = b.or(
+          [
+            `title_romaji.ilike.${like}`,
+            `title_english.ilike.${like}`,
+            `title_vi.ilike.${like}`,
+            `title_native.ilike.${like}`,
+          ].join(","),
+        );
+      }
+      if (genre) b = b.contains("genres", [genre]);
+      if (year) b = b.eq("year", toInt(year, 0, 1950, 2100));
+      if (season) b = b.eq("season", season.toUpperCase());
+      return b;
+    };
 
-    if (q) {
-      const like = `%${ilikeSafe(q)}%`;
-      query = query.or(
-        [
-          `title_romaji.ilike.${like}`,
-          `title_english.ilike.${like}`,
-          `title_vi.ilike.${like}`,
-          `title_native.ilike.${like}`,
-        ].join(","),
-      );
-    }
-    if (genre) query = query.contains("genres", [genre]);
-    if (year) query = query.eq("year", toInt(year, 0, 1950, 2100));
-    if (season) query = query.eq("season", season.toUpperCase());
-
-    const { data, error, count } = await query
+    const res = await buildQuery()
       .order(sort.column, { ascending: sort.ascending, nullsFirst: false })
       .range(from, from + limit - 1);
 
-    if (error) throw new Error(error.message);
+    let rows: AnimeRow[] = [];
+    let total = 0;
 
-    const rows = (data ?? []) as unknown as AnimeRow[];
+    if (res.error) {
+      if (!isRangeNotSatisfiable(res.error)) throw new Error(res.error.message);
+      // Vuốt quá trang cuối → trang rỗng, nhưng `total` vẫn phải đúng.
+      const counted = await buildQuery(true);
+      if (counted.error) throw new Error(counted.error.message);
+      total = counted.count ?? 0;
+    } else {
+      rows = (res.data ?? []) as unknown as AnimeRow[];
+      total = res.count ?? rows.length;
+    }
+
     const ids = rows.map((r) => r.id);
 
     let epsByAnime = new Map<number, EpisodeRow[]>();
@@ -102,8 +122,8 @@ Deno.serve(
         items,
         page,
         limit,
-        total: count ?? items.length,
-        has_more: (count ?? 0) > from + items.length,
+        total,
+        has_more: total > from + items.length,
       },
       { ttl: 600, query: q },
       { maxAge: 600, browserMaxAge: 120 },

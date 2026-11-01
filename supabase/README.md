@@ -13,6 +13,51 @@ PostgREST + RLS trực tiếp từ app khi cần watchlist — xem `db/schema.sq
 
 ---
 
+## 0. Trạng thái deploy thật (2026-11-01)
+
+Project **đã dựng và đã chạy**: `anistream` · ref `snpzrblwiamqtrnifdis` ·
+`https://snpzrblwiamqtrnifdis.supabase.co` · region `ap-southeast-1` (Singapore) ·
+Postgres `17.11.0.011`.
+
+| slug | version | `verify_jwt` | Smoke test thật | Kết quả |
+|---|---|---|---|---|
+| `home` | 1 | false | `GET /home?limit=2` | `200` + envelope `{data,meta}` |
+| `search` | 2 | false | `GET /search?q=frieren`, `?q=a&page=2` | `200`; trang vượt cuối → `items:[]` (đã vá lỗi 500) |
+| `anime` | 1 | false | `GET /anime?slug=…` | `200` khi có dữ liệu, `404 not_found` khi không |
+| `schedule` | 1 | false | `GET /schedule?days=7` | `200`, slots đúng shape (thử cả khi có data) |
+| `push` | 1 | false (bảo vệ bằng `x-cron-secret`) | `GET /push?dry_run=true` | `200`; gọi không có secret → `401` |
+
+`verify_jwt` để **false** cho cả 5, khớp `supabase/config.toml` (catalog là dữ liệu
+đọc công khai). Đã kiểm cả 2 chế độ: bật true thì thiếu header →
+`{"code":"UNAUTHORIZED_NO_AUTH_HEADER"}`; gửi `apikey` + `Authorization: Bearer <anon key>`
+(app Flutter gửi đúng như vậy) vẫn `200`. Tức **gateway + function + PostgREST + RLS
+đều đã thông** theo đúng đường app đi.
+
+Đã kiểm bằng dữ liệu mẫu thật (chèn → gọi API → xoá sạch, DB hiện trống để lần
+`python3 -m ingest.main all` đầu tiên ghi catalog thật):
+
+- `/home` trả đủ 4 shelf (`free`, `new_episodes`, `season`, `top`) + `schedule`,
+  `is_free` và `platforms` đúng, `episodes[].video_id` tách được từ URL YouTube.
+- `/search` lọc + đếm `total`/`has_more` đúng.
+- `/schedule` trả `free_platform` + `video_id` cho tập có link `free_legal` đã verify.
+- `/push?dry_run=true` fan-out đúng: 1 tập mới × 1 thiết bị theo dõi → 1 message,
+  payload `{title, body, data:{route:/anime/<slug>, …}}`.
+
+**Lỗi thật bắt được khi test (đã vá + có test):** `GET /search?q=a&page=2` trên
+catalog trống trả **HTTP 500 `Requested range not satisfiable`** — PostgREST trả 416
+(`PGRST103`) khi `offset` vượt quá số dòng, mà app có infinite scroll nên đây là lỗi
+người dùng thật sẽ gặp. Vá bằng `isRangeNotSatisfiable()` trong `_shared/query.ts`:
+trang vượt cuối → `items: []` + `total` đếm lại cho đúng. 7 test mới trong
+`tests/edge/query.test.mjs` (tổng **20/20 pass**).
+
+**Còn 2 việc chỉ chủ project làm được** (xem §2b và `VIEC_CAN_LAM.md`):
+
+1. `FCM_SERVICE_ACCOUNT` + `PUSH_CRON_SECRET` — cần Firebase project của bạn.
+   Chưa set thì `/push` **chỉ cho `dry_run`** (an toàn, và báo lỗi rõ nếu gọi thật).
+2. Mật khẩu Postgres của project đang là chuỗi literal do lúc tạo project truyền sai
+   → Dashboard → Settings → Database → **Reset database password**. App không dùng
+   mật khẩu này (chỉ dùng API key) nên không chặn gì.
+
 ## 1. Deploy (5 phút)
 
 ```bash
@@ -22,8 +67,10 @@ npm i -g supabase
 supabase login
 supabase link --project-ref <project-ref>
 
-# deploy cả 4
-supabase functions deploy home search schedule anime
+# deploy cả 5 (project thật đã deploy rồi — chỉ chạy lại khi sửa code)
+supabase functions deploy home search schedule anime push
+# push cần tắt kiểm JWT (cron không có JWT người dùng) — đã set trong config.toml
+# hoặc: supabase functions deploy push --no-verify-jwt
 
 # (tuỳ chọn) kiểm tra secret đã có — Supabase tự inject 2 biến này:
 #   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY

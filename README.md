@@ -46,29 +46,29 @@
 └── scripts/
     ├── preflight.sh          kiểm tra .env + schema + key (anon hay service_role) trước khi ingest
     ├── test_edge.sh          test logic push bằng Node (không cần Deno)
-    ├── test_api.sh           smoke test 4 endpoint
+    ├── test_api.sh           smoke test các endpoint
     └── setup_app.sh/.ps1     sinh thư mục platform còn thiếu
 ```
 
 ## Chạy từ đầu (theo thứ tự)
 
 ```bash
-# 1. Database
-#    → tạo project Supabase → SQL Editor → dán db/schema.sql
-#      (schema.sql đã gồm cả trigger tạo `profiles` khi đăng ký + RLS siết cho push.
-#       Nếu bạn đã chạy schema.sql từ trước: chạy thêm
-#       db/migrations/20261101_auth_profile_trigger.sql)
+# ✅ BƯỚC 1 + 3 ĐÃ LÀM SẴN trên project thật:
+#    https://snpzrblwiamqtrnifdis.supabase.co  (Singapore, free)
+#    · schema + RLS + view + trigger đã áp; DB đang TRỐNG (chờ ingest)
+#    · 5 Edge Function đã deploy: home · search · schedule · anime · push
+#    · .env ở gốc repo đã điền sẵn URL + service_role key (file bị gitignore)
+#    Chi tiết + bằng chứng test: supabase/README.md §0
 
-# 2. Ingest (cần SUPABASE_URL + SUPABASE_SERVICE_KEY trong .env)
-cp .env.example .env
+# 1+2. Ingest — chạy TỪ MÁY BẠN (sandbox chặn AniList/YouTube), cần mạng thật
 pip install -r ingest/requirements.txt
 bash scripts/preflight.sh           # ← kiểm tra key/schema trước, ~5 giây
 python3 -m ingest.main all          # hoặc thêm --dry-run để test không ghi DB
 
-# 3. Backend
-npm i -g supabase && supabase login && supabase link --project-ref <ref>
-supabase functions deploy home search schedule anime
-bash scripts/test_api.sh https://<ref>.supabase.co/functions/v1
+# 3. Backend — chỉ chạy lại khi sửa code Edge Function
+npm i -g supabase && supabase login && supabase link --project-ref snpzrblwiamqtrnifdis
+supabase functions deploy home search schedule anime push
+bash scripts/test_api.sh https://snpzrblwiamqtrnifdis.supabase.co/functions/v1
 
 # 4. App  (repo ĐÃ có android/ios/web/windows/macos/linux → KHÔNG chạy flutter create)
 cd app
