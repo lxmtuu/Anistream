@@ -110,12 +110,16 @@ else
 fi
 
 # ── 6. Tuỳ chọn (không chặn) ───────────────────────────────────────────────
-# ⚠️ TMDB CHƯA được code: ingest chỉ ĐỌC biến TMDB_API_KEY rồi bỏ qua, nên đặt
-# key vào cũng KHÔNG có title_vi/synopsis_vi. Đừng hứa hão ở đây nữa.
+# TMDB: job D dùng key này để lấy tên/tóm tắt tiếng Việt + danh sách tập.
+# Không có key thì app vẫn chạy nhưng toàn tên romaji và ít bộ có tập.
 if [ -n "${TMDB_API_KEY:-}" ]; then
-  warn "có TMDB_API_KEY nhưng ingest CHƯA dùng biến này (title_vi/synopsis_vi vẫn trống)"
+  case "${TMDB_API_KEY}" in
+    eyJ*) bad "TMDB_API_KEY trông giống Read Access Token (v4, bắt đầu 'eyJ') → code cần API Key v3 dạng chuỗi hex" ;;
+    *)    ok "có TMDB_API_KEY (job D: tên + tóm tắt tiếng Việt + danh sách tập)" ;;
+  esac
+else
+  warn "không có TMDB_API_KEY → bỏ qua job D: tên vẫn là romaji, ít bộ có danh sách tập"
 fi
-# Mô tả gốc: lấy từ AniList `description` → cột synopsis_original (không cần key)
 [ -n "${YOUTUBE_API_KEY:-}" ] && ok "có YOUTUBE_API_KEY (deep backfill)" \
                               || warn "không có YOUTUBE_API_KEY → chỉ lấy ~15 video mới nhất/kênh"
 

@@ -6,6 +6,7 @@ Lệnh:
   python3 -m ingest.main schedule  [--hours 26]   # A. lịch phát → anime + episodes  (chạy mỗi 30')
   python3 -m ingest.main catalog   [--pages 2]    # B. catalog theo mùa → anime      (chạy mỗi đêm)
   python3 -m ingest.main youtube   [--limit 25]   # C. video official → streaming_links (mỗi 6h)
+  python3 -m ingest.main tmdb                    # D. tên/tóm tắt tiếng Việt + tập (cần TMDB_API_KEY)
   python3 -m ingest.main all                      # chạy cả 3
 
 Cờ chung:
@@ -20,7 +21,7 @@ import datetime as dt
 import sys
 import time
 
-from . import anilist, config, db as dbmod, match, youtube
+from . import anilist, config, db as dbmod, match, tmdb, youtube
 
 
 # ─────────────────────────────────────────────── helpers
@@ -175,10 +176,93 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
     return len(links)
 
 
+# ─────────────────────────────────────────────── Job D
+def job_tmdb(DB, limit: int = 60, with_episodes: bool = True):
+    """Bổ sung tiếng Việt (title_vi, synopsis_vi) + danh sách tập từ TMDB.
+
+    Vì sao cần: AniList không có tiếng Việt → app toàn hiện tên romaji; và chỉ
+    22/104 anime có episodes nên mở bộ khác là trang chi tiết trống.
+    """
+    print("\n▶ Job D — TMDB: tên + tóm tắt tiếng Việt, danh sách tập")
+    if not tmdb.is_configured():
+        raise RuntimeError(
+            "Thiếu TMDB_API_KEY → không bổ sung được tiếng Việt.\n"
+            "  Lấy key miễn phí: https://www.themoviedb.org/settings/api\n"
+            "  Thêm vào .env:  TMDB_API_KEY=xxxxxxxx"
+        )
+
+    cols = ("id, slug, title_romaji, title_english, title_native, title_vi, "
+            "synopsis_vi, year, episodes_total, tmdb_id")
+    # Ưu tiên bộ phổ biến (người dùng thấy trước), và bộ còn thiếu dữ liệu.
+    rows = DB.select(
+        "anime",
+        f"select={cols}&or=(title_vi.is.null,synopsis_vi.is.null,episodes_total.is.null)"
+        f"&order=popularity.desc&limit={int(limit)}",
+    )
+    print(f"  · {len(rows)} anime cần làm giàu")
+
+    patched = eps_written = 0
+    no_match, no_vi, multi_season = [], [], []
+    for i, row in enumerate(rows, 1):
+        label = (row.get("title_english") or row.get("title_romaji") or row.get("slug"))[:46]
+        try:
+            best, score, how = tmdb.match_anime(row)
+            if not best:
+                no_match.append(f"{label}  ({how})")
+                continue
+            detail = tmdb.fetch_detail(best["id"])
+            title_vi, overview_vi = tmdb.extract_vietnamese(detail)
+            seasons = tmdb.real_seasons(detail)
+            single = len(seasons) == 1
+            if len(seasons) > 1:
+                multi_season.append(f"{label}  ({len(seasons)} mùa)")
+
+            patch = tmdb.build_anime_patch(row, detail, title_vi, overview_vi, single)
+            if patch:
+                DB.patch("anime", {"id": row["id"]}, patch)
+                patched += 1
+                chi_tiet = ", ".join(
+                    f"{k}={v}" for k, v in patch.items() if k in ("title_vi", "episodes_total")
+                ) or ", ".join(sorted(patch))
+                print(f"  [{i}/{len(rows)}] {label[:40]:<40} tmdb={best['id']} "
+                      f"{score:.2f} ← {chi_tiet}")
+            elif not title_vi and not overview_vi:
+                no_vi.append(label)
+
+            # Danh sách tập: chỉ khi phim có đúng 1 mùa VÀ row chưa có tập nào.
+            if with_episodes and single and not row.get("episodes_total"):
+                have = DB.select("episodes", f"select=number&anime_id=eq.{row['id']}&limit=1")
+                if not have:
+                    season = tmdb.fetch_season(best["id"], seasons[0])
+                    eps = tmdb.episode_rows(row["id"], season, single)
+                    if eps:
+                        DB.upsert("episodes", eps, on_conflict="anime_id,number")
+                        eps_written += len(eps)
+                        print(f"      + {len(eps)} tập")
+        except tmdb.TmdbError:
+            raise                      # lỗi cấu hình/mạng → nổ ngay, không nuốt
+        except Exception as e:         # lỗi 1 bộ không được làm chết cả job
+            print(f"  ! {label}: {type(e).__name__}: {str(e)[:140]}")
+
+    if no_match:
+        print(f"  ⚠ {len(no_match)} anime không tìm được trên TMDB (bỏ qua, không đoán bừa):")
+        for n in no_match[:10]:
+            print(f"      - {n}")
+    if no_vi:
+        print(f"  ⚠ {len(no_vi)} anime có trên TMDB nhưng CHƯA có bản dịch tiếng Việt")
+    if multi_season:
+        print(f"  ⚠ {len(multi_season)} anime nhiều mùa → chỉ lấy tên/tóm tắt, "
+              f"KHÔNG lấy tập (tránh gán sai số tập)")
+
+    DB.log_ingest("tmdb", "enrich", True, patched + eps_written)
+    print(f"  ✓ {patched} anime được bổ sung · {eps_written} tập")
+    return patched + eps_written
+
+
 # ─────────────────────────────────────────────── CLI
 def main(argv=None):
     ap = argparse.ArgumentParser(description="AniStream ingest worker")
-    ap.add_argument("command", choices=["schedule", "catalog", "youtube", "all"])
+    ap.add_argument("command", choices=["schedule", "catalog", "youtube", "tmdb", "all"])
     ap.add_argument("--hours", type=int, default=26)
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--limit", type=int, default=25, help="số video mỗi kênh")
@@ -186,6 +270,8 @@ def main(argv=None):
     ap.add_argument("--no-embed-check", action="store_true")
     ap.add_argument("--deep", action="store_true",
                     help="lấy TOÀN BỘ lịch sử kênh (cần YOUTUBE_API_KEY)")
+    ap.add_argument("--limit-tmdb", type=int, default=60,
+                    help="số anime làm giàu mỗi lần chạy job TMDB")
     ap.add_argument("--max-videos", type=int, default=5000,
                     help="giới hạn số video mỗi kênh khi --deep")
     args = ap.parse_args(argv)
@@ -212,6 +298,17 @@ def main(argv=None):
         if args.command in ("youtube", "all"):
             total += job_youtube(DB, args.limit, not args.no_embed_check,
                                  deep=args.deep, max_per_channel=args.max_videos)
+        if args.command == "tmdb":
+            total += job_tmdb(DB, args.limit_tmdb)
+        elif args.command == "all":
+            # `all` chạy cả 4 job. Không có key TMDB thì BÁO RÕ rồi bỏ qua job D
+            # (không im lặng, và không làm đỏ cả lần chạy vì thiếu key tuỳ chọn).
+            if tmdb.is_configured():
+                total += job_tmdb(DB, args.limit_tmdb)
+            else:
+                print("\n⚠ BỎ QUA Job D (TMDB): chưa có TMDB_API_KEY → "
+                      "tên/tóm tắt tiếng Việt và danh sách tập sẽ không được bổ sung.")
+                DB.log_ingest("tmdb", "enrich", False, 0, "thiếu TMDB_API_KEY")
     except KeyboardInterrupt:
         print("\n… dừng theo yêu cầu")
         return 130

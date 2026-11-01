@@ -2,13 +2,14 @@
 
 # ingest — Worker dữ liệu cho AniStream
 
-3 job, chạy bằng cron (GitHub Actions), **0đ**, **không cần API key** (trừ TMDB tuỳ chọn).
+4 job, chạy bằng cron (GitHub Actions), **0đ**. Chỉ job D cần API key (TMDB, miễn phí).
 
 | Job | Nguồn | Tần suất | Ghi vào |
 |---|---|---|---|
 | `schedule` | AniList `airingSchedules` | 30 phút | `anime`, `episodes` |
 | `catalog` | AniList `seasonal` | 1 lần/đêm | `anime` |
 | `youtube` | RSS kênh official + oEmbed sơ bộ | 6 giờ | `anime`, `streaming_links` (kind=`free_legal`) |
+| `tmdb` | TMDB `search/tv` + `translations` + `season` | 1 lần/ngày | `anime` (title_vi, synopsis_vi, episodes_total), `episodes` |
 
 ## Cài & chạy
 
@@ -24,11 +25,37 @@ python3 -m ingest.main schedule --dry-run
 python3 -m ingest.main schedule
 python3 -m ingest.main catalog --pages 2
 python3 -m ingest.main youtube --limit 25
+python3 -m ingest.main tmdb                # cần TMDB_API_KEY (miễn phí)
 python3 -m ingest.main all
 ```
 
 Cờ: `--dry-run` (không ghi DB) · `--no-embed-check` (bỏ kiểm tra oEmbed, nhanh hơn) ·
 `--hours N` (cửa sổ lịch phát) · `--pages N` (số trang catalog) · `--limit N` (video/kênh)
+
+## Job D — tiếng Việt + danh sách tập (TMDB)
+
+AniList không có tiếng Việt, và trước bản vá này chỉ 22/104 anime có `episodes`:
+app hiện `Kusuriya no Hitorigoto` thay vì *Dược Sư Tự Sự*, và mở 79 bộ khác thì
+trang chi tiết trống. Job D lấp 2 chỗ đó.
+
+```
+/search/tv (english → romaji → native, kèm năm)  →  /tv/{id}?append_to_response=alternative_titles,translations
+                                                 →  /tv/{id}/season/1  (chỉ khi đúng 1 mùa)
+```
+
+Quy tắc **thà thiếu còn hơn sai**:
+
+| Tình huống | Hành vi |
+|---|---|
+| Không ghép được tên/năm | Bỏ qua, in `không tìm được trên TMDB` — **không đoán bừa** |
+| `title_vi`/`synopsis_vi` đã có | **Không ghi đè** (dữ liệu biên tập tay được giữ) |
+| Phim nhiều mùa | Chỉ lấy tên/tóm tắt; **không** lấy số tập (Takagi-san 3 mùa = 36 tập, không phải 12) |
+| Bản dịch `vi` rỗng | Thử `alternative_titles` VN; trùng y tên gốc thì coi là chưa có |
+| `TMDB_API_KEY` sai (401) | Nổ ngay `TmdbError`, không nuốt |
+| Chạy `all` mà không có key | In cảnh báo rõ + ghi `ingest_runs(ok=false)`, các job khác vẫn chạy |
+
+Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API Key (v3)**.
+⚠️ Không dùng "Read Access Token (v4)" — code gọi bằng `api_key`.
 
 ## Job C hoạt động thế nào (và vì sao hợp pháp)
 

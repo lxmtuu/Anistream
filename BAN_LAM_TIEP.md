@@ -15,6 +15,7 @@
 | 3 | Nạp dữ liệu thật (`ingest`) | 5' | ✅ |
 | 4 | Kiểm chứng bằng số | 2' | ✅ |
 | 5 | Chạy app với dữ liệu thật | 10' | ✅ |
+| 5b | Tiếng Việt + danh sách tập (TMDB) | 5' | ⚙️ nên làm |
 | 6 | Bật thông báo đẩy + tự động hoá | 20' | ⚙️ tuỳ chọn |
 
 ---
@@ -125,6 +126,49 @@ select count(*) from anime where synopsis_original is not null;   -- phải > 0
 
 Trước bản vá, `synopsis` trong API **luôn rỗng** nên trang chi tiết trống phần giới thiệu.
 
+## Bước 3c — (Tuỳ chọn nhưng nên làm) Tiếng Việt + danh sách tập
+
+Hiện app hiện tên romaji/english (`Kusuriya no Hitorigoto`) vì **AniList không có
+tiếng Việt**, và chỉ 5/104 bộ có link xem. Job D lấy từ TMDB: `title_vi`,
+`synopsis_vi`, `episodes_total` và danh sách tập.
+
+```bash
+# 1. Lấy key miễn phí (1 phút): themoviedb.org → Settings → API → "API Key (v3)"
+#    (KHÔNG dùng Read Access Token v4 — code gọi bằng api_key)
+# 2. Thêm vào .env:
+#    TMDB_API_KEY=xxxxxxxx
+bash scripts/preflight.sh            # phải thấy: ✅ có TMDB_API_KEY
+python3 -m ingest.main tmdb          # ~2-4 phút cho 60 bộ
+```
+
+**Kỳ vọng:**
+
+```
+▶ Job D — TMDB: tên + tóm tắt tiếng Việt, danh sách tập
+  · 60 anime cần làm giàu
+  [1/60] The Apothecary Diaries      tmdb=237162 0.91 ← title_vi=Dược Sư Tự Sự, episodes_total=24
+      + 24 tập
+  ✓ 42 anime được bổ sung · 310 tập
+```
+
+Kiểm trong SQL Editor:
+
+```sql
+select count(*) filter (where title_vi is not null) as co_ten_viet,
+       count(*) filter (where synopsis_vi is not null) as co_tom_tat,
+       count(*) filter (where episodes_total is not null) as co_so_tap
+from anime;                                   -- cả 3 phải > 0
+
+select count(distinct anime_id) from episodes; -- phải tăng so với trước
+```
+
+Job D **không ghi đè** dữ liệu đã có, **không** lấy số tập của phim nhiều mùa, và
+bộ nào không ghép được tên/năm thì bỏ qua (in `không tìm được trên TMDB`) chứ
+không đoán bừa. Chi tiết quy tắc: `ingest/README.md` § Job D.
+
+> Muốn job D chạy tự động hằng ngày: thêm `TMDB_API_KEY` vào GitHub secrets
+> (Settings → Secrets → Actions). Không có key thì job D tự bỏ qua kèm cảnh báo.
+
 ## Bước 4 — Kiểm chứng bằng số (2 phút)
 
 **a) Kiểm API thật** (5 function đang để `verify_jwt=false` nên không cần key):
@@ -205,6 +249,18 @@ Secrets and variables → Actions → New repository secret**:
 | `TMDB_API_KEY` | nếu có |
 
 Sau đó **Actions → ingest → Run workflow** để chạy thử 1 lần (đừng đợi cron).
+
+⚠️ **Đừng tin cron chỉ vì bảng Actions trông đã bật.** Ngày 01/11/2026 kiểm tra
+thật: `event=schedule` có **0 run** dù cron 30 phút, workflow `state=active`.
+Kiểm bằng lệnh có sẵn:
+
+```bash
+bash scripts/check_cron.sh          # exit 0 = cron chạy thật · exit 1 = cron chết
+```
+
+Nếu `exit 1` sau vài giờ: dùng cron ngoài (cron-job.org) gọi
+`POST /repos/<owner>/<repo>/actions/workflows/ingest.yml/dispatches` với body
+`{"ref":"main"}` — script in sẵn câu lệnh mẫu.
 
 ### 6c. Bật thông báo "tập mới vừa ra" (15 phút)
 
