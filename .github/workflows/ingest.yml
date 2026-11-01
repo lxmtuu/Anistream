@@ -8,6 +8,7 @@ on:
     - cron: "*/30 * * * *"   # Job A: lịch phát (mỗi 30')
     - cron: "10 */6 * * *"   # Job C: video official (lệch 10' để không trùng A)
     - cron: "17 19 * * *"    # Job B: catalog (02:17 giờ VN)
+    - cron: "40 20 * * *"    # Job D: TMDB — tên/tóm tắt tiếng Việt + tập (03:40 giờ VN)
     #
     # ⚠️ GitHub TỰ TẮT scheduled workflow sau 60 ngày repo không có commit mới.
     # Run do cron tạo ra không tính là "hoạt động". Nếu app im lặng quá 2 tháng,
@@ -15,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "schedule | catalog | youtube | all"
+        description: "schedule | catalog | youtube | tmdb | all"
         default: "all"
 
 concurrency:
@@ -43,6 +44,7 @@ jobs:
             "*/30 * * * *") echo "cmd=schedule"  >> $GITHUB_OUTPUT ;;
             "10 */6 * * *") echo "cmd=youtube"   >> $GITHUB_OUTPUT ;;
             "17 19 * * *")  echo "cmd=catalog"   >> $GITHUB_OUTPUT ;;
+            "40 20 * * *")  echo "cmd=tmdb"      >> $GITHUB_OUTPUT ;;
             *)              echo "cmd=${{ github.event.inputs.command || 'all' }}" >> $GITHUB_OUTPUT ;;
           esac
 
@@ -51,6 +53,7 @@ jobs:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TMDB_API_KEY:         ${{ secrets.TMDB_API_KEY }}
+          # Không có TMDB_API_KEY → job D báo rõ rồi bỏ qua (xem main.py)
           INGEST_COMMAND:       ${{ steps.pick.outputs.cmd }}
         run: python -m ingest.main "$INGEST_COMMAND"
 

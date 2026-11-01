@@ -88,6 +88,38 @@ class DB:
             raise RuntimeError(f"upsert {table} lỗi {r.status_code}: {r.text[:500]}")
         return r.json()
 
+    def patch(self, table: str, filters: Dict[str, Any], values: Dict[str, Any]) -> int:
+        """UPDATE một phần (PATCH) — dùng khi chỉ muốn sửa vài cột.
+
+        Vì sao không dùng `upsert`: upsert cần payload có đủ cột NOT NULL (slug,
+        title_romaji) và dễ ghi đè nhầm dữ liệu khác. PATCH chỉ đụng đúng cột
+        truyền vào, an toàn hơn cho việc làm giàu dữ liệu (title_vi, synopsis_vi…).
+
+        Trả số dòng đã sửa (PostgREST trả 204 khi `return=minimal` → 0..n không
+        biết chính xác, nên trả 1 khi thành công để job đếm được).
+        """
+        if not values:
+            return 0
+        if self.dry:
+            print(f"  [dry-run] patch {table} {filters} ← {list(values)}")
+            return 0
+        params = {k: f"eq.{v}" for k, v in filters.items()}
+        r = requests.patch(
+            f"{self.url}/rest/v1/{table}",
+            params=params,
+            json=values,
+            headers={
+                "apikey": self.key,
+                "Authorization": f"Bearer {self.key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+            timeout=config.HTTP_TIMEOUT,
+        )
+        if r.status_code not in (200, 204):
+            raise RuntimeError(f"patch {table} lỗi {r.status_code}: {r.text[:300]}")
+        return 1
+
     def select(self, table: str, query: str) -> List[Dict]:
         if self.dry:
             return []

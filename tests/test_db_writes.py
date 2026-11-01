@@ -54,6 +54,42 @@ class TestLogIngest(unittest.TestCase):
                 db.log_ingest("youtube", "links", False, 0)   # không được raise
 
 
+class TestPatch(unittest.TestCase):
+    """PATCH một phần — dùng cho job TMDB (chỉ sửa đúng cột cần sửa)."""
+
+    def test_gui_dung_filter_va_chi_cot_can_sua(self):
+        db = _db()
+        with patch("ingest.db.requests.patch", return_value=FakeResp(204)) as p:
+            db.patch("anime", {"id": 5}, {"title_vi": "Dược Sư Tự Sự"})
+
+        kwargs = p.call_args.kwargs
+        self.assertEqual(kwargs["params"], {"id": "eq.5"})
+        self.assertEqual(kwargs["json"], {"title_vi": "Dược Sư Tự Sự"})
+        self.assertEqual(kwargs["headers"]["Prefer"], "return=minimal")
+        self.assertIn("/rest/v1/anime", p.call_args.args[0])
+
+    def test_khong_goi_mang_khi_khong_co_gi_doi(self):
+        db = _db()
+        with patch("ingest.db.requests.patch") as p:
+            self.assertEqual(db.patch("anime", {"id": 1}, {}), 0)
+        p.assert_not_called()
+
+    def test_loi_phai_no(self):
+        db = _db()
+        with patch("ingest.db.requests.patch",
+                   return_value=FakeResp(400, text="column does not exist")):
+            with self.assertRaises(RuntimeError) as ctx:
+                db.patch("anime", {"id": 1}, {"title_vi": "x"})
+        self.assertIn("patch anime lỗi 400", str(ctx.exception))
+
+    def test_dry_run_khong_goi_mang(self):
+        db = DB(dry_run=True)
+        with patch("ingest.db.requests.patch") as p:
+            with redirect_stdout(io.StringIO()):
+                db.patch("anime", {"id": 1}, {"title_vi": "x"})
+        p.assert_not_called()
+
+
 class TestUpsert(unittest.TestCase):
     def test_chia_lo_200(self):
         db = _db()
