@@ -2,8 +2,9 @@
 anilist.py — AniList GraphQL: lịch phát, catalog theo mùa, search.
 Miễn phí, không cần key. Giới hạn ~30–90 request/phút → có retry khi 429.
 """
+import datetime as dt
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import requests
 
 from . import config
@@ -145,10 +146,22 @@ def to_anime_row(m: Dict) -> Dict:
     }
 
 
-def to_episode_row(anime_id: int, number: int, airing_at: int, title: str = "") -> Dict:
+def to_iso(ts: Any) -> Optional[str]:
+    """AniList trả `airingAt` là epoch GIÂY (int). Cột `airing_at` là timestamptz
+    nên Postgres cần chuỗi ISO 8601 — gửi số thô sẽ bị
+    `22008 date/time field value out of range: "1793536200"` và chết cả job A.
+    """
+    if ts is None or ts == "":
+        return None
+    if isinstance(ts, str):
+        return ts
+    return dt.datetime.fromtimestamp(int(ts), tz=dt.timezone.utc).isoformat()
+
+
+def to_episode_row(anime_id: int, number: int, airing_at: Any, title: str = "") -> Dict:
     return {
         "anime_id": anime_id,
         "number": number,
-        "airing_at": airing_at,
+        "airing_at": to_iso(airing_at),
         "title": title or None,
     }
