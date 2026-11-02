@@ -252,6 +252,21 @@ def pick_best(
 
 
 # ─────────────────────────────────────────── lấy dữ liệu tiếng Việt
+# Ký tự CHỈ có trong tiếng Việt (dấu thanh + chữ đặc trưng). Dùng để phân biệt
+# "tên Việt" với tên gốc TMDB trả về khi chưa có bản dịch (`name` fallback).
+_VI_CHARS = set(
+    "àáảãạăằắẳẵặâầấẩẫậđèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợ"
+    "ùúủũụưừứửữựỳýỷỹỵ"
+    "ÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬĐÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ"
+    "ÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ"
+)
+
+
+def looks_vietnamese(text: str) -> bool:
+    """Chuỗi có dấu tiếng Việt? (Không dùng để đoán ngôn ngữ nói chung.)"""
+    return any(ch in _VI_CHARS for ch in (text or ""))
+
+
 def extract_vietnamese(detail: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
     """Trả (title_vi, overview_vi) — ưu tiên bản dịch `vi`, rồi tên thay thế VN.
 
@@ -278,10 +293,25 @@ def extract_vietnamese(detail: Dict[str, Any]) -> Tuple[Optional[str], Optional[
                 name = a["title"].strip()
                 break
 
-    # Không coi "bản dịch" trùng y nguyên tên gốc là tiếng Việt
+    # Không coi "bản dịch" trùng y nguyên tên TMDB trả về là tiếng Việt
+    # (test: translations vi ghi đúng "Frieren" → không phải tên Việt).
     original = (detail.get("name") or "").strip()
     if name and original and norm(name) == norm(original):
         name = None
+
+    # `_get` LUÔN gửi `language=vi-VN` ⇒ `detail["name"]` đã là tên ĐÃ BẢN ĐỊA
+    # HOÁ (TMDB trả tên gốc khi chưa có bản dịch). Trước đây hàm này chỉ đọc khối
+    # `translations` + alternative title VN nên **0/119 bộ có tmdb_id nhận được
+    # title_vi** (đo 02/11/2026), dù TMDB có tên Việt cho phần lớn bộ phổ biến:
+    # bản dịch `vi` thường chỉ có `overview`, còn `name` nằm ở bản địa hoá.
+    # Chỉ nhận khi chuỗi CÓ DẤU tiếng Việt — "One Piece"/"Frieren" (TMDB trả
+    # nguyên tên gốc) không được coi là tên Việt.
+    if not name:
+        loc = (detail.get("name") or "").strip()
+        orig = (detail.get("original_name") or "").strip()
+        if loc and looks_vietnamese(loc) and norm(loc) != norm(orig):
+            name = loc
+
     return name or None, overview or None
 
 

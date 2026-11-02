@@ -69,6 +69,7 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 | D | `tmdb` | TMDB: tiếng Việt + tập | hằng ngày |
 | D' | `tmdb --refresh` | TMDB: **tập MỚI** của bộ đang chiếu | hằng ngày |
 | D'' | `tmdb --only-slug <slug>` | TMDB: **đúng bộ được chỉ định**, bỏ qua hạn "đã hỏi" | chạy tay |
+| D+ | `tmdb --force` | TMDB: bỏ hạn "đã hỏi" cho **mọi** bộ (sau khi sửa cách đọc) | chạy tay |
 | E | `seasons` | AniList `relations` → **mùa thiếu** (SEQUEL + PREQUEL) | hằng ngày |
 | F | `jikan` | Jikan/MAL → lấp tập còn thiếu (`--fill-gaps`: cả bộ thiếu vài tập) | hằng ngày |
 | G | `add --anilist <id>` | **thêm đúng 1 bộ** từ AniList (bộ job khác không gặp) | chạy tay |
@@ -78,6 +79,29 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 | I | `publish` | **ẩn/hiện** bộ theo nội dung thật (`anime.is_published`) | hằng ngày |
 
 `all` = A + B + C + C' + D + D' + E + F + I + G. (`reassign` chạy tay — xem dưới.)
+
+### Job D — `title_vi` = 0/119 bộ: tên Việt nằm ở bản địa hoá, không phải `translations`
+
+Đo 02/11/2026: **119 bộ có `tmdb_id` mà `title_vi` = 0**, trong khi `synopsis_vi`
+có 106. Không phải TMDB thiếu tên Việt — mà `extract_vietnamese` chỉ đọc:
+
+1. `translations[]` với `iso_639_1 = "vi"` → bản dịch `vi` của TMDB **thường chỉ
+   có `overview`**, `name` để rỗng;
+2. `alternative_titles` với `iso_3166_1 = "VN"` → rất hiếm bộ có.
+
+Trong khi đó `_get` **đã** gửi `language=vi-VN` từ lâu ⇒ `detail["name"]` chính
+là tên đã bản địa hoá. Nay có bước 3: nhận `detail["name"]` **chỉ khi chuỗi có
+dấu tiếng Việt** (`looks_vietnamese`) và khác `original_name`. "One Piece" /
+"Frieren" (TMDB trả nguyên tên gốc) vẫn không bị coi là tên Việt.
+
+Chạy lại ngay được mà không chờ 7 ngày:
+
+```bash
+python3 -m ingest.main tmdb --force --limit-tmdb 200
+```
+
+(`--force` bỏ hạn `tmdb_checked_at`; trước đây cả 163 bộ đều "vừa hỏi" nên bản
+vá này sẽ không có tác dụng cho tới khi hết hạn.)
 
 ### Job I — ẩn bộ KHÔNG có nội dung khỏi danh sách
 

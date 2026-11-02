@@ -825,3 +825,39 @@ class TestCatTheoKhoangChieu(unittest.TestCase):
     def test_khong_co_ngay_bat_dau_thi_khong_ghi(self):
         self.assertEqual(tmdb.episode_rows_in_window(
             9, self._season(), None, None, 12), [])
+
+
+class TestTenVietTuBanDiaHoa(unittest.TestCase):
+    """`title_vi` = 0/119 bộ có `tmdb_id` (đo 02/11/2026).
+
+    Nguyên nhân: `_get` đã gửi `language=vi-VN` từ lâu, nhưng `extract_vietnamese`
+    chỉ đọc khối `translations` (bản dịch `vi` của TMDB thường CHỈ có `overview`,
+    `name` để rỗng) và alternative title quốc gia VN (rất hiếm) ⇒ không bao giờ
+    lấy tên đã bản địa hoá ở `detail["name"]`.
+    """
+
+    def test_lay_ten_da_ban_dia_hoa(self):
+        t, o = tmdb.extract_vietnamese({"name": "Dược Sư Tự Sự"})
+        self.assertEqual(t, "Dược Sư Tự Sự")
+        self.assertIsNone(o)
+
+    def test_ten_goc_khong_dau_thi_khong_nhan(self):
+        for name in ("One Piece", "Frieren", "薬屋のひとりごと", "Sousou no Frieren"):
+            with self.subTest(name=name):
+                self.assertEqual(tmdb.extract_vietnamese({"name": name}), (None, None))
+
+    def test_ten_ban_dia_hoa_trung_original_name_thi_bo(self):
+        d = {"name": "Đảo Hải Tặc Trở Lại", "original_name": "Đảo Hải Tặc Trở Lại"}
+        self.assertEqual(tmdb.extract_vietnamese(d), (None, None))
+
+    def test_ban_dich_van_thang_ban_dia_hoa(self):
+        d = {"name": "Dược Sư Tự Sự",
+             "translations": {"translations": [
+                 {"iso_639_1": "vi", "data": {"name": "Dược Sư Tự Sự (Vietsub)"}}]}}
+        self.assertEqual(tmdb.extract_vietnamese(d)[0], "Dược Sư Tự Sự (Vietsub)")
+
+    def test_looks_vietnamese(self):
+        self.assertTrue(tmdb.looks_vietnamese("Thợ Săn Quái Vật"))
+        self.assertTrue(tmdb.looks_vietnamese("Đảo Hải Tặc"))
+        self.assertFalse(tmdb.looks_vietnamese("Hunter x Hunter"))
+        self.assertFalse(tmdb.looks_vietnamese(""))

@@ -443,7 +443,8 @@ def _prune_duplicate_numbers(DB, row: dict, eps_written_rows: list) -> int:
     return removed
 
 
-def _tmdb_candidates(DB, limit: int, refresh: bool, only: list) -> list:
+def _tmdb_candidates(DB, limit: int, refresh: bool, only: list,
+                     force: bool = False) -> list:
     """Chọn anime cho job TMDB.
 
     `only` khác rỗng ⇒ **chỉ** đúng những slug đó, bỏ qua mọi bộ lọc "đã hỏi gần
@@ -454,6 +455,10 @@ def _tmdb_candidates(DB, limit: int, refresh: bool, only: list) -> list:
     luôn thoả điều kiện `title_vi.is.null` nên trước đây bị quét lại ở MỌI lần
     chạy (đo 02/11/2026: 792 giây cho 0 bản ghi). RELEASING hỏi lại sau 1 ngày
     (cần bắt tập mới), còn lại 7 ngày.
+
+    `force=True` bỏ hẳn hạn đó — dùng khi vừa SỬA CÁCH ĐỌC dữ liệu TMDB (VD bản
+    vá `title_vi` 02/11/2026: cả 163 bộ đã "hỏi gần đây" nên bản vá sẽ không có
+    tác dụng cho tới 7 ngày sau).
     """
     if only:
         cond = ",".join(only)
@@ -495,7 +500,8 @@ def _tmdb_candidates(DB, limit: int, refresh: bool, only: list) -> list:
         )
         print(f"  · {len(cand)} anime cần làm giàu · bỏ qua bộ đã hỏi TMDB "
               f"trong {stale_after} ngày")
-    rows = [r for r in cand if tmdb.is_stale(r.get("tmdb_checked_at"), cutoff)]
+    rows = cand if force else [
+        r for r in cand if tmdb.is_stale(r.get("tmdb_checked_at"), cutoff)]
 
     # Bộ ĐÁNG có tập mà bảng `episodes` đang trống (view `anime_thieu_tap`).
     # Hai query trên đều bỏ sót nhóm này (đã có title_vi + episodes_total, hoặc
@@ -514,9 +520,9 @@ def _tmdb_candidates(DB, limit: int, refresh: bool, only: list) -> list:
         thieu = []
     fresh_thieu = [r for r in thieu
                    if r.get("id") not in seen
-                   and tmdb.is_stale(r.get("tmdb_checked_at"),
-                                     tmdb.stale_cutoff(
-                                         tmdb.STALE_DAYS_RELEASING))]
+                   and (force or tmdb.is_stale(r.get("tmdb_checked_at"),
+                                               tmdb.stale_cutoff(
+                                                   tmdb.STALE_DAYS_RELEASING)))]
     for r in fresh_thieu:
         # Đánh dấu: bộ này nằm trong view vì danh sách tập SAI (trống, hoặc có
         # tập trùng ngày chiếu) ⇒ phải xử lý lại KỂ CẢ khi đã có tập.
@@ -532,7 +538,8 @@ def _tmdb_candidates(DB, limit: int, refresh: bool, only: list) -> list:
 
 
 def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
-             refresh: bool = False, only_slug: str = ""):
+             refresh: bool = False, only_slug: str = "",
+             force: bool = False):
     """Bổ sung tiếng Việt (title_vi, synopsis_vi) + danh sách tập từ TMDB.
 
     Hai chế độ:
@@ -549,6 +556,8 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
     mode = "làm mới bộ đang chiếu" if refresh else "bổ sung bộ còn thiếu"
     if only:
         mode += f" · chỉ {len(only)} slug"
+    if force:
+        mode += " · bỏ hạn 'đã hỏi'"
     print(f"\n▶ Job D — TMDB: tên + tóm tắt tiếng Việt, danh sách tập  [{mode}]")
     if not tmdb.is_configured():
         raise RuntimeError(
@@ -557,7 +566,7 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
             "  Thêm vào .env:  TMDB_API_KEY=xxxxxxxx"
         )
 
-    rows = _tmdb_candidates(DB, limit, refresh, only)
+    rows = _tmdb_candidates(DB, limit, refresh, only, force=force)
 
 
 
@@ -1227,6 +1236,9 @@ def main(argv=None):
                     help="lấy TOÀN BỘ lịch sử kênh (cần YOUTUBE_API_KEY)")
     ap.add_argument("--limit-tmdb", type=int, default=60,
                     help="số anime làm giàu mỗi lần chạy job TMDB")
+    ap.add_argument("--force", action="store_true",
+                    help="job tmdb: bỏ hạn 'đã hỏi gần đây' (vừa sửa cách đọc "
+                         "TMDB thì phải chạy lại ngay được)")
     ap.add_argument("--only-slug", default="",
                     help="job tmdb: chỉ xử lý (các) slug này, cách nhau bằng dấu "
                          "phẩy — bỏ qua lọc 'đã hỏi gần đây'")
@@ -1279,7 +1291,7 @@ def main(argv=None):
                                  only_channel=args.channel)
         if args.command == "tmdb":
             total += job_tmdb(DB, args.limit_tmdb, refresh=args.refresh,
-                              only_slug=args.only_slug)
+                              only_slug=args.only_slug, force=args.force)
         if args.command == "seasons":
             total += job_seasons(DB, args.limit_seasons)
         if args.command == "jikan":
