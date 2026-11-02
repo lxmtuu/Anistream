@@ -165,6 +165,24 @@ giảm dần) và `match_anime(row, accept=…)` gọi `accept(ứng_viên)` đ�
 đó có mùa cần tìm hay không; tối đa 3 ứng viên mỗi chuỗi tìm. Job truyền
 `season_for()` (pick_season → split_season_offset) làm `accept`.
 
+### Job D — không quét lại bộ vừa hỏi TMDB (02/11/2026)
+
+Một lần chạy quét đủ **161 bộ trong 792 giây** và ghi được **0 bản ghi**. Nguyên
+nhân: điều kiện chọn bộ là `or=(title_vi.is.null, synopsis_vi.is.null,
+episodes_total.is.null)` — bộ mà TMDB **không có** (44 bộ) hoặc **không có bản dịch
+vi** (13 bộ) luôn thoả điều kiện đó, nên lần nào cũng bị chọn lại.
+
+Nay có cột `anime.tmdb_checked_at` (migration
+`db/migrations/20261102_tmdb_checked_at.sql`) ghi "lần cuối đã hỏi TMDB":
+
+| Trạng thái | Hỏi lại sau |
+|---|---|
+| `RELEASING` (đang chiếu) | **1 ngày** — cần bắt tập mới |
+| còn lại | **7 ngày** |
+
+Bộ chưa từng hỏi (`NULL`) thì luôn được xử lý. Lọc ở Python (không nhồi vào query
+string) vì PostgREST không nhận hai tham số `or=` cùng lúc.
+
 ### Job D — soi một bộ: `python3 -m ingest.tmdb`
 
 Khi log ghi "không tìm được trên TMDB" mà bạn tin là TMDB có, chạy:
@@ -174,8 +192,10 @@ python3 -m ingest.tmdb --slug the-ramparts-of-ice-season-2
 python3 -m ingest.tmdb --title "Dandadan 2nd Season" --year 2025 --total 12
 ```
 
-Nó in **mọi** chuỗi đã tìm, số kết quả, và từng kết quả kèm `✓/✗` + điểm — đủ để
-biết bị loại vì lệch tên, lệch năm, hay TMDB thật sự không có bộ đó (không đoán).
+Nó in **mọi** chuỗi đã tìm, số kết quả, và từng kết quả kèm `✓/✗` + điểm; với
+ứng viên đạt ngưỡng thì in tiếp **từng mùa** (số tập + ngày chiếu) và kết luận
+`✓ CHỌN mùa N` / `✗ TỪ CHỐI: <lý do>`. Đủ để biết bị loại vì lệch tên, lệch năm,
+TMDB không có mùa đó, hay số tập không khớp.
 
 ### Job H — `reassign`: link bị gán sai mùa
 

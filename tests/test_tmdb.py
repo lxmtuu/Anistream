@@ -558,6 +558,31 @@ class TestExplain(unittest.TestCase):
         self.assertIn("✓", out)
         self.assertIn("✗", out)
 
+    def test_in_luon_cac_mua_va_ly_do_tu_choi(self):
+        """Log cũ chỉ nói "TMDB chỉ có mùa 1" mà không nói mùa đó bao nhiêu tập
+        ⇒ không thể biết vì sao bị từ chối. Nay phải in từng mùa + lý do."""
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        # Ca thật: kusuriya-no-hitorigoto-2nd-season — tên ghi mùa 2 nhưng TMDB
+        # chỉ có mùa 1 với 12 tập (khác xa 24 tập AniList) → phải TỪ CHỐI.
+        row = {"slug": "kusuriya-2nd",
+               "title_english": "The Apothecary Diaries Season 2",
+               "year": 2025, "episodes_total": 24, "tmdb_id": None}
+        res = [{"id": 220542, "name": "The Apothecary Diaries Season 2",
+                "first_air_date": "2023-10-22"}]
+        detail = {"seasons": [{"season_number": 1, "episode_count": 12,
+                               "air_date": "2023-10-22"}]}
+        with patch.object(tmdb, "_get", return_value={"results": res}), \
+                patch.object(tmdb, "fetch_detail", return_value=detail), \
+                patch.object(tmdb.time, "sleep"):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                tmdb.explain(row)
+        out = buf.getvalue()
+        self.assertIn("mùa 1: 12 tập", out)
+        self.assertIn("TỪ CHỐI", out)
+
 
 class TestGopMuaTrenTmdb(unittest.TestCase):
     """TMDB gộp nhiều mùa AniList vào MỘT season.
@@ -643,3 +668,35 @@ class TestThuUngVienKeTiep(unittest.TestCase):
             best, score, _ = tmdb.match_anime(row, accept=accept)
         self.assertEqual(best["id"], 333686, "phải thử ứng viên kế tiếp")
         self.assertEqual(seen[0], 220542)
+
+
+class TestBoQuaBoVuaHoiTmdb(unittest.TestCase):
+    """Không quét lại bộ vừa hỏi TMDB.
+
+    Đo 02/11/2026: một lần chạy quét đủ 161 bộ trong **792 giây** và ghi được
+    **0 bản ghi** — vì 44 bộ TMDB không có + 13 bộ không có bản dịch vi luôn
+    thoả `title_vi.is.null` nên lần nào cũng bị chọn lại.
+    """
+
+    NOW = dt.datetime(2026, 11, 2, 12, 0, 0, tzinfo=dt.timezone.utc)
+
+    def test_chua_tung_hoi_thi_xu_ly(self):
+        cutoff = tmdb.stale_cutoff(7, self.NOW)
+        self.assertTrue(tmdb.is_stale(None, cutoff))
+
+    def test_hoi_hom_qua_thi_bo_qua(self):
+        cutoff = tmdb.stale_cutoff(7, self.NOW)
+        self.assertFalse(tmdb.is_stale("2026-11-01T23:59:59+00:00", cutoff))
+
+    def test_hoi_30_ngay_truoc_thi_xu_ly_lai(self):
+        cutoff = tmdb.stale_cutoff(7, self.NOW)
+        self.assertTrue(tmdb.is_stale("2026-10-01T00:00:00+00:00", cutoff))
+
+    def test_dang_chieu_chi_cho_1_ngay(self):
+        cutoff = tmdb.stale_cutoff(tmdb.STALE_DAYS_RELEASING, self.NOW)
+        self.assertFalse(tmdb.is_stale("2026-11-02T09:00:00+00:00", cutoff))
+        self.assertTrue(tmdb.is_stale("2026-11-01T09:00:00+00:00", cutoff))
+
+    def test_cutoff_dung_so_ngay(self):
+        self.assertEqual(tmdb.stale_cutoff(7, self.NOW), "2026-10-26T12:00:00")
+        self.assertEqual(tmdb.stale_cutoff(1, self.NOW), "2026-11-01T12:00:00")

@@ -101,11 +101,16 @@ class TestJobTmdb(unittest.TestCase):
                 n = ingest_main.job_tmdb(db)
             return n, buf.getvalue()
 
+    @staticmethod
+    def _real_patches(db):
+        """Bỏ qua patch mốc `tmdb_checked_at` (chỉ là tối ưu thời gian)."""
+        return [p for p in db.patched if "tmdb_checked_at" not in p[2]]
+
     def test_dien_ten_va_tom_tat_tieng_viet(self):
         db = FakeDB([dict(ROW)])
         n, out = self._run(db)
-        self.assertEqual(len(db.patched), 1)
-        _, filters, values = db.patched[0]
+        self.assertEqual(len(self._real_patches(db)), 1)
+        _, filters, values = self._real_patches(db)[0]
         self.assertEqual(filters, {"id": 5})
         self.assertEqual(values["title_vi"], "Dược Sư Tự Sự")
         self.assertEqual(values["synopsis_vi"], "Maomao.")
@@ -172,8 +177,11 @@ class TestJobTmdb(unittest.TestCase):
     def test_khong_match_thi_khong_ghi_gi(self):
         db = FakeDB([dict(ROW)])
         n, out = self._run(db, match=lambda row: (None, 0.0, "search[x]"))
-        self.assertEqual(db.patched, [])
+        self.assertEqual(self._real_patches(db), [],
+                         "không match được → không ghi dữ liệu gì")
         self.assertEqual(db.upserted, [])
+        # vẫn ĐÁNH DẤU đã hỏi TMDB để lần sau không quét lại ngay
+        self.assertEqual(len(db.patched), 1)
         self.assertEqual(n, 0)
         self.assertIn("không tìm được trên TMDB", out)
 
@@ -204,7 +212,7 @@ class TestJobTmdb(unittest.TestCase):
             return MATCH
 
         n, out = self._run(db, match=flaky)
-        self.assertEqual(len(db.patched), 1)          # bộ 6 vẫn được xử lý
+        self.assertEqual(len(self._real_patches(db)), 1)   # bộ 6 vẫn được xử lý
         self.assertIn("dữ liệu TMDB lạ", out)
 
     def test_thieu_key_thi_runtime_error_kem_huong_dan(self):

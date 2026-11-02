@@ -41,6 +41,33 @@ class TmdbError(RuntimeError):
     """Lỗi gọi TMDB — luôn nổi lên (không nuốt), kèm mã HTTP."""
 
 
+# Bộ đã hỏi TMDB cách đây bao lâu thì bỏ qua (tránh quét lại mãi thứ không đổi).
+# Đo 02/11/2026: 161 bộ × ~5s = 792 giây cho **0 bản ghi** vì 44 bộ TMDB không có
+# và 13 bộ không có bản dịch vi luôn thoả `title_vi.is.null`.
+STALE_DAYS = 7
+STALE_DAYS_RELEASING = 1
+
+
+def stale_cutoff(days: int, now: Optional[dt.datetime] = None) -> str:
+    """Mốc ISO (UTC) để so với `tmdb_checked_at`."""
+    base = now or dt.datetime.now(dt.timezone.utc)
+    return (base - dt.timedelta(days=int(days))).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def now_iso() -> str:
+    """Thời điểm hiện tại (UTC, ISO) để ghi `anime.tmdb_checked_at`."""
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+
+def is_stale(checked_at: Optional[str], cutoff: str) -> bool:
+    """Bộ này đã lâu chưa hỏi TMDB? (None = chưa từng hỏi → luôn xử lý)."""
+    if not checked_at:
+        return True
+    # Supabase trả '2026-11-02T05:12:33.123456+00:00'; so sánh chuỗi ISO là đủ
+    # khi cùng múi giờ, nhưng cắt về 19 ký tự cho chắc (bỏ microsecond + offset).
+    return checked_at[:19] < cutoff[:19]
+
+
 def is_configured() -> bool:
     return bool(config.TMDB_API_KEY)
 
@@ -717,6 +744,7 @@ def explain(row: Dict[str, Any], limit: int = 5) -> int:
         if b and b not in queries:
             queries.append(b)
 
+    seen: set = set()
     for q in queries:
         params: Dict[str, Any] = {"query": q}
         if year_filter is not None:
@@ -732,6 +760,35 @@ def explain(row: Dict[str, Any], limit: int = 5) -> int:
             ok = "✓" if sc >= TITLE_THRESHOLD else "✗"
             print(f"    {ok} {sc:.3f}  {r.get('id')}  {r.get('name')!r} "
                   f"({r.get('first_air_date') or '?'})")
+            # In LUÔN các mùa của ứng viên đạt ngưỡng + quyết định chọn mùa.
+            # Thiếu phần này thì log chỉ nói "TMDB chỉ có mùa 1" mà không cho
+            # biết mùa đó bao nhiêu tập → không thể biết vì sao bị từ chối.
+            if sc < TITLE_THRESHOLD or r.get("id") in seen:
+                continue
+            seen.add(r.get("id"))
+            try:
+                det = fetch_detail(r["id"])
+            except TmdbError as e:
+                print(f"        ↳ không đọc được chi tiết: {e}")
+                continue
+            seasons = season_candidates(det)
+            if not seasons:
+                print("        ↳ TMDB: KHÔNG có mùa nào")
+                continue
+            for sn in seasons:
+                print(f"        ↳ mùa {sn['number']}: {sn['count']} tập "
+                      f"({sn['air_date'] or '?'})")
+            no, why = pick_season(det, row.get("year"),
+                                  row.get("episodes_total"), hint)
+            extra = ""
+            if no is None:
+                sp = split_season_offset(det, hint, row.get("episodes_total"))
+                if sp:
+                    no, extra = sp["season"], f" · gộp mùa, trừ {sp['offset']} tập"
+            if no is None:
+                print(f"        ✗ TỪ CHỐI: {why}")
+            else:
+                print(f"        ✓ CHỌN mùa {no} ({why}){extra}")
         if not res:
             print("    (TMDB không trả gì cho chuỗi này — thử tên khác)")
         time.sleep(SLEEP_BETWEEN)

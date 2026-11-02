@@ -354,7 +354,19 @@ def job_link_episodes(DB, limit: int = 20000):
 
 # ─────────────────────────────────────────────── Job D
 TMDB_COLS = ("id, slug, title_romaji, title_english, title_native, title_vi, "
-             "synopsis_vi, year, episodes_total, tmdb_id")
+             "synopsis_vi, year, episodes_total, tmdb_id, tmdb_checked_at")
+
+
+def _mark_checked(DB, row: dict) -> None:
+    """Ghi mốc "đã hỏi TMDB về bộ này" để lần sau không quét lại ngay.
+
+    Không làm chết job: đây chỉ là tối ưu thời gian, lỗi thì bỏ qua.
+    """
+    try:
+        DB.patch("anime", {"id": row["id"]},
+                 {"tmdb_checked_at": tmdb.now_iso()})
+    except Exception:                  # noqa: BLE001
+        pass
 
 
 def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
@@ -380,21 +392,37 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
         )
 
     # Ưu tiên bộ phổ biến (người dùng thấy trước).
+    #
+    # Bỏ qua bộ VỪA hỏi TMDB gần đây: bộ mà TMDB không có (44 bộ) hoặc không có
+    # bản dịch vi (13 bộ) luôn thoả điều kiện `title_vi.is.null` nên trước đây bị
+    # quét lại ở MỌI lần chạy. Đo 02/11/2026: 792 giây cho 0 bản ghi.
+    # RELEASING hỏi lại sau 1 ngày (cần bắt tập mới), còn lại 7 ngày.
+    stale_after = tmdb.STALE_DAYS_RELEASING if refresh else tmdb.STALE_DAYS
+    cutoff = tmdb.stale_cutoff(stale_after)
+    # Lọc "đã hỏi gần đây" ở Python chứ không nhồi vào query string: PostgREST
+    # không nhận hai tham số `or=` cùng lúc, còn logic tree `and=(or(…),or(…))`
+    # rất dễ sai cú pháp và làm job chết trên máy người chạy.
+    over = int(limit) * 4
     if refresh:
-        rows = DB.select(
+        cand = DB.select(
             "anime",
             f"select={TMDB_COLS}&status=eq.RELEASING"
-            f"&order=popularity.desc&limit={int(limit)}",
+            f"&order=popularity.desc&limit={over}",
         )
-        print(f"  · {len(rows)} anime đang chiếu cần làm mới")
+        print(f"  · {len(cand)} anime đang chiếu · làm mới những bộ chưa hỏi "
+              f"trong {stale_after} ngày")
     else:
-        rows = DB.select(
+        cand = DB.select(
             "anime",
             f"select={TMDB_COLS}"
             f"&or=(title_vi.is.null,synopsis_vi.is.null,episodes_total.is.null)"
-            f"&order=popularity.desc&limit={int(limit)}",
+            f"&order=popularity.desc&limit={over}",
         )
-        print(f"  · {len(rows)} anime cần làm giàu")
+        print(f"  · {len(cand)} anime cần làm giàu · bỏ qua bộ đã hỏi TMDB "
+              f"trong {stale_after} ngày")
+    rows = [r for r in cand if tmdb.is_stale(r.get("tmdb_checked_at"), cutoff)]
+    rows = rows[:int(limit)]
+    print(f"  · {len(rows)} anime sẽ xử lý lần này")
 
     patched = eps_written = new_episodes = 0
     no_match, no_vi, multi_season, implausible = [], [], [], []
@@ -444,6 +472,7 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                 first, _, how2 = tmdb.match_anime(row)
                 if not first:
                     no_match.append(f"{label}  ({how2})")
+                    _mark_checked(DB, row)      # đã hỏi TMDB, đừng hỏi lại ngay
                     continue
                 _, last_why, _ = season_for(first["id"])
                 multi_season.append(f"{label}  ({last_why})")
@@ -535,6 +564,7 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                                     new_episodes += len(new_eps)
                             else:
                                 print(f"      + {len(eps)} tập (mùa {season_no}, {why})")
+            _mark_checked(DB, row)          # xong bộ này → ghi mốc "đã hỏi"
         except tmdb.TmdbError:
             raise                      # lỗi cấu hình/mạng → nổ ngay, không nuốt
         except Exception as e:         # lỗi 1 bộ không được làm chết cả job
