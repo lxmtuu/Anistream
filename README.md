@@ -72,8 +72,10 @@ bash scripts/preflight.sh           # ← kiểm tra key/schema trước, ~5 gi�
 python3 -m ingest.main all          # hoặc thêm --dry-run để test không ghi DB
 
 # 3. Backend — chỉ chạy lại khi sửa code Edge Function
-npm i -g supabase && supabase login && supabase link --project-ref snpzrblwiamqtrnifdis
-supabase functions deploy home search schedule anime push
+#    (KHÔNG cần cài `supabase` toàn cục: script tự dùng `npx supabase@latest`)
+npx --yes supabase@latest login      # 1 lần duy nhất
+bash scripts/deploy_edge.sh          # deploy cả 4 + kiểm phiên bản ACTIVE
+bash scripts/deploy_edge.sh home     # hoặc deploy đúng 1 function
 bash scripts/test_api.sh https://snpzrblwiamqtrnifdis.supabase.co/functions/v1
 
 # 4. App  (repo ĐÃ có android/ios/web/windows/macos/linux → KHÔNG chạy flutter create)

@@ -600,7 +600,7 @@ Kèm 2 lỗi nữa cùng đợt:
 ⚠️ Sau khi `git pull`, phải deploy lại edge function thì thay đổi mới có hiệu lực:
 
 ```bash
-supabase functions deploy home search schedule anime push
+bash scripts/deploy_edge.sh     # hoặc: supabase functions deploy home search schedule anime push
 ```
 
 ### PGRST102 "All object keys must match" (lỗi thật 02/11/2026)
