@@ -194,6 +194,25 @@ Luật này cũng chạy như **fallback cuối** khi season đã chọn có s�
 
 `explain` cũng đi qua luật này nên chẩn đoán và job luôn khớp nhau.
 
+### Job D — `seasons[].episode_count` của TMDB hay LỆCH (02/11/2026)
+
+Lần chạy 15:30 còn 3 bộ bị bỏ. Một trong số đó lộ ra lỗi này: detail TMDB báo
+`episode_count = 12` nhưng `GET /tv/{id}/season/1` trả **24 tập**. Luật "gộp mùa"
+(`24 ≈ 2 × 12`) dùng số trong detail nên bị bỏ qua.
+
+Nay trong nhánh "không hợp", job **thử lại** `split_season_offset(...)` với
+`season_count = n_season` (số tập THẬT đọc được), rồi mới đến tách-theo-năm.
+
+`explain` cũng in thêm **phân bố ngày chiếu** để biết vì sao tách theo năm trượt:
+
+```
+        ↳ mùa 1: 24 tập (2024-04-07)
+        ↳ ngày chiếu: 2025: 24 tập
+```
+
+(0 tập ở năm 2026 ⇒ năm của entry AniList không có tập nào — dữ liệu TMDB khác
+giả định, không phải lỗi code.)
+
 ### Job D — không quét lại bộ vừa hỏi TMDB (02/11/2026)
 
 Một lần chạy quét đủ **161 bộ trong 792 giây** và ghi được **0 bản ghi**. Nguyên
