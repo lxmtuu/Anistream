@@ -427,14 +427,19 @@ def _prune_duplicate_numbers(DB, row: dict, eps_written_rows: list) -> int:
         return 0
     last = max(r["number"] for r in eps_written_rows)
     dates = {str(r.get("airing_at"))[:10] for r in eps_written_rows}
+    # Xoá theo KHOÁ CHÍNH `id`: lọc theo `number` từng khớp 0 dòng mà vẫn trả
+    # 204 (lỗi thật 02/11/2026) nên không ai biết việc dọn đã thất bại.
     extra = DB.select(
         "episodes",
-        f"select=number,airing_at&anime_id=eq.{row['id']}&number=gt.{last}")
+        f"select=id,number,airing_at&anime_id=eq.{row['id']}&number=gt.{last}")
     removed = 0
     for e in extra or []:
         if str(e.get("airing_at"))[:10] in dates:
-            DB.delete("episodes", {"anime_id": row["id"], "number": e["number"]})
-            removed += 1
+            n = DB.delete("episodes", {"id": e["id"]})
+            removed += n
+            if not n:
+                print(f"      ! xoá tập trùng số {e.get('number')} không ăn "
+                      f"(0 dòng) — kiểm lại quyền/hàng trong bảng episodes")
     return removed
 
 

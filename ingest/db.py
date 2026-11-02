@@ -177,19 +177,25 @@ class DB:
                       and v.split(".", 1)[0] in _FILTER_OPS
                       else f"eq.{v}")
                   for k, v in filters.items()}
+        # `return=representation` để biết THẬT SỰ xoá được bao nhiêu dòng.
+        # Lỗi thật 02/11/2026: xoá lọc theo cột `number` trả 204 nhưng khớp 0
+        # dòng → job in "dọn 12 tập trùng" trong khi dữ liệu vẫn còn nguyên.
         r = requests.delete(
             f"{self.url}/rest/v1/{table}",
             params=params,
             headers={
                 "apikey": self.key,
                 "Authorization": f"Bearer {self.key}",
-                "Prefer": "return=minimal",
+                "Prefer": "return=representation",
             },
             timeout=config.HTTP_TIMEOUT,
         )
         if r.status_code not in (200, 204):
             raise RuntimeError(f"delete {table} lỗi {r.status_code}: {r.text[:300]}")
-        return 1
+        try:
+            return len(r.json() or [])
+        except ValueError:
+            return 1 if r.status_code == 200 else 0
 
     def select(self, table: str, query: str) -> List[Dict]:
         if self.dry:

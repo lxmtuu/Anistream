@@ -194,6 +194,20 @@ Luật này cũng chạy như **fallback cuối** khi season đã chọn có s�
 
 `explain` cũng đi qua luật này nên chẩn đoán và job luôn khớp nhau.
 
+### Job D — `delete` trả 204 nhưng khớp 0 dòng (02/11/2026)
+
+Lần chạy 17:42 in `dọn 12 tập trùng` nhưng DB **vẫn còn** 12 dòng trùng
+(`tensei-…-3rd-season` giữ 24 dòng). Nguyên nhân: `requests.delete` với
+`Prefer: return=minimal` trả **204 kể cả khi không khớp dòng nào**, nên
+`DB.delete` luôn trả 1 = "thành công" và lọc theo cột `number` không ăn cũng
+không ai biết.
+
+Nay:
+* `DB.delete` dùng `Prefer: return=representation` và **trả số dòng thật bị xoá**
+  (0 nếu không khớp) — mọi chỗ gọi đều cộng đúng con số này;
+* dọn tập trùng xoá theo **khoá chính `id`** (không phụ thuộc cột `number`);
+* nếu xoá 0 dòng thì in cảnh báo ngay tại chỗ, không im lặng.
+
 ### Job D — "đã có tập" không có nghĩa là tập ĐÚNG (02/11/2026)
 
 Lần chạy 17:34 xử lý `tensei-…-3rd-season` nhưng không ghi gì: bộ còn 24 dòng,

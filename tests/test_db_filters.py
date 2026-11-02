@@ -13,8 +13,11 @@ from ingest import db as dbmod
 
 
 class FakeResp:
-    status_code = 204
+    status_code = 200
     text = ""
+
+    def json(self):
+        return [{"id": 1}]      # đúng 1 dòng bị xoá
 
 
 class TestFilterOperators(unittest.TestCase):
@@ -39,6 +42,28 @@ class TestFilterOperators(unittest.TestCase):
         with patch.object(dbmod.requests, "delete", return_value=FakeResp()) as m:
             d.delete("episodes", {"anime_id": 5, "airing_at": "gt.2026-09-26"})
         self.assertEqual(m.call_args.kwargs["params"]["airing_at"], "gt.2026-09-26")
+
+    def test_delete_tra_so_dong_that(self):
+        """`return=representation` → đếm số dòng THẬT bị xoá.
+
+        Lỗi thật 02/11/2026: xoá lọc theo `number` trả 204 nhưng khớp 0 dòng,
+        job in "dọn 12 tập trùng" trong khi dữ liệu còn nguyên.
+        """
+        d = self._db()
+        resp = MagicMock(status_code=200, text="")
+        resp.json.return_value = [{"id": 1}, {"id": 2}]
+        with patch.object(dbmod.requests, "delete", return_value=resp) as m:
+            n = d.delete("episodes", {"id": 5})
+        self.assertEqual(n, 2)
+        self.assertEqual(m.call_args.kwargs["headers"]["Prefer"],
+                         "return=representation")
+
+    def test_delete_khop_0_dong_tra_0(self):
+        d = self._db()
+        resp = MagicMock(status_code=200, text="")
+        resp.json.return_value = []
+        with patch.object(dbmod.requests, "delete", return_value=resp):
+            self.assertEqual(d.delete("episodes", {"number": 25}), 0)
 
     def test_delete_khong_bo_loc_thi_no(self):
         with self.assertRaises(RuntimeError):
