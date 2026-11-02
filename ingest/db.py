@@ -134,7 +134,14 @@ class DB:
         if self.dry:
             print(f"  [dry-run] patch {table} {filters} ← {list(values)}")
             return 0
-        params = {k: f"eq.{v}" for k, v in filters.items()}
+        # Cho phép truyền toán tử PostgREST sẵn ("lt.2025-01-01") để xoá theo
+        # KHOẢNG; mặc định vẫn là eq.
+        ops = ("eq", "neq", "lt", "lte", "gt", "gte", "in", "is")
+        params = {
+            k: (v if isinstance(v, str) and v.split(".", 1)[0] in ops
+                else f"eq.{v}")
+            for k, v in filters.items()
+        }
         r = requests.patch(
             f"{self.url}/rest/v1/{table}",
             params=params,

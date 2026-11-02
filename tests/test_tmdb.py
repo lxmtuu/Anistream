@@ -773,3 +773,55 @@ class TestDonMuaTachTheoNam(unittest.TestCase):
             {"season_number": 1, "episode_count": 24, "air_date": "2023-10-22"},
             {"season_number": 2, "episode_count": 24, "air_date": "2025-01-10"}]}
         self.assertIsNone(tmdb.merged_year_candidate(D, 2, 2025, 24))
+
+
+class TestCatTheoKhoangChieu(unittest.TestCase):
+    """TMDB gộp nhiều cour vào MỘT season → cắt bằng ngày chiếu của entry AniList.
+
+    Ca thật 02/11/2026:
+      · `yozakura-…-2nd-season` — TMDB 216467 mùa 2 có 24 tập (12/04/2026 →),
+        AniList tách "2nd Season" 12 tập + "2nd Season Part 2" 12 tập; cả hai
+        đều năm 2026 nên luật theo NĂM không dùng được.
+      · `tensei-kizoku-…-2nd-season` — TMDB 237150 có MỘT season 36 tập, AniList
+        mùa 2 chiếu 06/10/2024 → 22/12/2024 (nằm giữa 36 tập đó).
+    """
+
+    @staticmethod
+    def _season():
+        eps, n = [], 1
+        d = dt.date(2026, 4, 12)
+        for i in range(24):                    # 24 tập, mỗi tuần 1 tập
+            eps.append({"episode_number": n,
+                        "air_date": (d + dt.timedelta(days=7 * i)).isoformat(),
+                        "name": f"T{n}"})
+            n += 1
+        return {"episodes": eps}
+
+    def test_lay_12_tap_dau_theo_khoang_chieu(self):
+        rows = tmdb.episode_rows_in_window(
+            9, self._season(), dt.date(2026, 4, 12), dt.date(2026, 6, 28), 12)
+        self.assertEqual([r["number"] for r in rows], list(range(1, 13)))
+        self.assertEqual(rows[0]["title"], "T1")
+        self.assertTrue(rows[0]["airing_at"].startswith("2026-04-12"))
+
+    def test_cour_thu_hai_lay_12_tap_sau(self):
+        rows = tmdb.episode_rows_in_window(
+            9, self._season(), dt.date(2026, 7, 5), dt.date(2026, 9, 20), 12)
+        self.assertEqual(len(rows), 12)
+        self.assertEqual(rows[0]["title"], "T13", "phải là tập 13 của TMDB")
+        self.assertTrue(rows[0]["airing_at"].startswith("2026-07-05"))
+
+    def test_khoang_chieu_lech_so_tap_thi_tu_choi(self):
+        # 12 tập AniList nhưng khoảng chiếu chứa 24 tập → không ghép bừa
+        self.assertEqual(tmdb.episode_rows_in_window(
+            9, self._season(), dt.date(2026, 4, 12), dt.date(2026, 9, 20), 12), [])
+
+    def test_dang_chieu_chua_biet_ngay_ket_thuc(self):
+        rows = tmdb.episode_rows_in_window(
+            9, self._season(), dt.date(2026, 4, 12), None, 12)
+        self.assertEqual(len(rows), 12)
+        self.assertEqual(rows[-1]["title"], "T12")
+
+    def test_khong_co_ngay_bat_dau_thi_khong_ghi(self):
+        self.assertEqual(tmdb.episode_rows_in_window(
+            9, self._season(), None, None, 12), [])

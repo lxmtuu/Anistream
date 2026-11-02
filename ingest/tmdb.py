@@ -481,6 +481,84 @@ def episode_rows_by_year(
     return out
 
 
+def episode_rows_in_window(
+    anime_id: int,
+    season: Dict[str, Any],
+    start: Optional[dt.date],
+    end: Optional[dt.date],
+    episodes_total: Optional[int],
+    tolerance: int = 2,
+    slack_days: int = 2,
+) -> List[Dict[str, Any]]:
+    """Lấy tập của season nằm trong KHOẢNG CHIẾU của entry AniList, đánh số lại.
+
+    Ca thật 02/11/2026 — TMDB 216467: mùa 2 có **24 tập** (12/04/2026 → …), còn
+    AniList tách thành "2nd Season" (12 tập) + "2nd Season Part 2" (12 tập).
+    Luật theo NĂM không tách được (cả hai đều 2026) và luật trừ offset cũng
+    không (TMDB có season riêng). Ngày chiếu của chính entry AniList mới là ranh
+    giới đúng: cour 1 nằm trong 04→06/2026, cour 2 nằm trong 07→09/2026.
+
+    An toàn:
+      · không có `start` → trả rỗng (không đoán);
+      · có `end` mà số tập trong khoảng lệch `episodes_total` quá `tolerance`
+        → trả rỗng;
+      · không có `end` (đang chiếu) → lấy các tập ĐẦU TIÊN kể từ `start`,
+        tối đa `episodes_total`.
+    """
+    if not isinstance(start, dt.date):
+        return []
+    total = int(episodes_total) if isinstance(episodes_total, int) and episodes_total > 0 else 0
+    lo = start - dt.timedelta(days=slack_days)
+    hi = (end + dt.timedelta(days=slack_days)) if isinstance(end, dt.date) else None
+
+    picked = []
+    for e in season.get("episodes") or []:
+        air = e.get("air_date") or ""
+        if not isinstance(e.get("episode_number"), int) or not air[:10]:
+            continue
+        try:
+            d = dt.date.fromisoformat(air[:10])
+        except ValueError:
+            continue
+        if d < lo or (hi is not None and d > hi):
+            continue
+        picked.append((d, e))
+    picked.sort(key=lambda t: (t[0], t[1]["episode_number"]))
+
+    if hi is not None:
+        if total and abs(len(picked) - total) > tolerance:
+            return []              # khoảng chiếu không khớp số tập → không ghép bừa
+    elif total and len(picked) > total:
+        picked = picked[:total]     # đang chiếu, season TMDB dài hơn → lấy phần đầu
+    if not picked:
+        return []
+
+    out = []
+    for new_num, (_, e) in enumerate(picked, 1):
+        air = e["air_date"]
+        row = {
+            "anime_id": anime_id,
+            "number": new_num,
+            "airing_at": dt.datetime.fromisoformat(air[:10]).replace(
+                tzinfo=dt.timezone.utc).isoformat(),
+        }
+        title = clean_episode_title(e.get("name"))
+        if title:
+            row["title"] = title
+        out.append(row)
+    return out
+
+
+def season_first_year(season: Dict[str, Any]) -> Optional[int]:
+    """Năm chiếu của tập ĐẦU TIÊN có ngày trong season TMDB (None nếu không có)."""
+    years = []
+    for e in season.get("episodes") or []:
+        air = (e.get("air_date") or "")[:4]
+        if air.isdigit():
+            years.append(int(air))
+    return min(years) if years else None
+
+
 def episode_rows(
     anime_id: int,
     season: Dict[str, Any],

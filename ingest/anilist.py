@@ -301,3 +301,49 @@ def to_episode_row(anime_id: int, number: int, airing_at: Any, title: str = "") 
     if title:
         row["title"] = title
     return row
+
+
+# ─────────────────────────────────────── airing window (cho job TMDB)
+WINDOW_FIELDS = """
+  id idMal episodes status
+  startDate { year month day }
+  endDate { year month day }
+"""
+
+
+def _date_of(node: Optional[Dict]) -> Optional[dt.date]:
+    """{year, month, day} của AniList → `date`; thiếu ngày thì None (không đoán)."""
+    if not isinstance(node, dict):
+        return None
+    y, m, d = node.get("year"), node.get("month"), node.get("day")
+    if not all(isinstance(v, int) for v in (y, m, d)):
+        return None
+    try:
+        return dt.date(y, m, d)
+    except ValueError:
+        return None
+
+
+def airing_window(media_id: int) -> Dict[str, Any]:
+    """Khoảng chiếu của MỘT entry AniList: {"from", "to", "episodes"}.
+
+    Vì sao cần: TMDB hay gộp nhiều cour/mùa vào MỘT season (Yozakura mùa 2 =
+    24 tập trên TMDB, còn AniList tách "2nd Season" 12 tập + "2nd Season Part 2"
+    12 tập). Chỉ dựa vào NĂM thì hai cour cùng năm không tách được. Ngày chiếu
+    đầu/cuối của chính entry AniList là ranh giới chính xác để lọc tập TMDB.
+
+    `to` có thể là None (bộ đang chiếu) — khi đó job lấy các tập ĐẦU TIÊN kể từ
+    `from`. Trả {} nếu AniList không có startDate.
+    """
+    q = """
+    query ($id: Int) {
+      Media(id: $id) { %s }
+    }""" % WINDOW_FIELDS
+    data = gql(q, {"id": int(media_id)})
+    media = ((data or {}).get("data") or {}).get("Media") or {}
+    return {
+        "from": _date_of(media.get("startDate")),
+        "to": _date_of(media.get("endDate")),
+        "episodes": media.get("episodes"),
+        "status": media.get("status"),
+    }

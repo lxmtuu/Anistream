@@ -369,6 +369,44 @@ def _mark_checked(DB, row: dict) -> None:
         pass
 
 
+def _airing_window(row: dict) -> dict:
+    """Khoảng chiếu của entry AniList ({"from","to"}) — {} nếu không có.
+
+    Chỉ dùng cho ca TMDB lệch mùa. Lỗi mạng KHÔNG được làm chết job, nhưng phải
+    báo ra (trả {"error": …}) để không ai tưởng là dữ liệu đã khớp.
+    """
+    aid = row.get("anilist_id")
+    if not aid:
+        return {}
+    try:
+        return anilist.airing_window(int(aid))
+    except Exception as e:                        # noqa: BLE001
+        return {"error": str(e)[:90]}
+
+
+def _prune_episodes_outside(DB, row: dict, win: dict) -> int:
+    """Xoá tập có ngày chiếu nằm NGOÀI khoảng chiếu AniList (dữ liệu gộp mùa cũ).
+
+    Ca thật 02/11/2026: `tensei-kizoku-…-3rd-season` (2026) bị ghi 36 tập của
+    TMDB season 1 gộp (07/04/2024 →), tức tập của mùa 1+2 nằm trong mùa 3. Khi
+    đã xác định đúng khoảng chiếu thì tập cũ nằm ngoài khoảng đó là SAI.
+
+    Chừa 90 ngày mỗi đầu để không xoá nhầm ca mùa đông chiếu từ tháng 12 năm
+    trước. Xoá theo tập đã ghi (không đụng bảng khác).
+    """
+    start, end = win.get("from"), win.get("to")
+    removed = 0
+    if isinstance(start, dt.date):
+        lo = (start - dt.timedelta(days=90)).isoformat()
+        removed += DB.delete("episodes",
+                             {"anime_id": row["id"], "airing_at": f"lt.{lo}"})
+    if isinstance(end, dt.date):
+        hi = (end + dt.timedelta(days=90)).isoformat()
+        removed += DB.delete("episodes",
+                             {"anime_id": row["id"], "airing_at": f"gt.{hi}"})
+    return removed
+
+
 def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
              refresh: bool = False):
     """Bổ sung tiếng Việt (title_vi, synopsis_vi) + danh sách tập từ TMDB.
@@ -530,13 +568,49 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                         "episodes", f"select=number&anime_id=eq.{row['id']}&limit=600")
                     existing = {e.get("number") for e in have}
                 else:
-                    have = DB.select("episodes",
-                                     f"select=number&anime_id=eq.{row['id']}&limit=1")
+                    have = DB.select(
+                        "episodes",
+                        f"select=number,airing_at&anime_id=eq.{row['id']}"
+                        "&order=airing_at.asc&limit=1")
                     existing = set()
-                if refresh or not have:
+                # Tập đã có nhưng bắt đầu ở NĂM KHÁC năm của entry ⇒ dữ liệu cũ
+                # lấy từ season gộp (tensei-…-3rd-season: 2026 nhưng tập từ
+                # 2024). Vẫn phải xử lý lại, không được coi là "đã có tập".
+                first_have = str((have[0].get("airing_at") if have else "") or "")[:4]
+                wrong_start = (
+                    first_have.isdigit() and isinstance(row.get("year"), int)
+                    and int(first_have) != int(row["year"]))
+                if refresh or not have or wrong_start:
                     season = tmdb.fetch_season(best["id"], season_no)
                     n_season = len([e for e in (season.get("episodes") or [])
                                     if isinstance(e.get("episode_number"), int)])
+                    # Season TMDB "trông như gộp nhiều mùa": số tập khác tổng
+                    # của AniList, hoặc season bắt đầu ở năm KHÁC entry. Khi đó
+                    # khoảng chiếu của chính entry AniList là ranh giới đúng.
+                    first_year = tmdb.season_first_year(season)
+                    merged_look = bool(
+                        row.get("episodes_total")
+                        and isinstance(first_year, int)
+                        and isinstance(row.get("year"), int)
+                        and (n_season != row["episodes_total"]
+                             or first_year != int(row["year"])))
+                    if merged_look:
+                        win = _airing_window(row)
+                        eps_w = tmdb.episode_rows_in_window(
+                            row["id"], season, win.get("from"), win.get("to"),
+                            row.get("episodes_total")) if win.get("from") else []
+                        if eps_w:
+                            DB.upsert("episodes", eps_w,
+                                      on_conflict="anime_id,number")
+                            eps_written += len(eps_w)
+                            n_pruned = _prune_episodes_outside(DB, row, win)
+                            print(f"      + {len(eps_w)} tập (theo khoảng chiếu "
+                                  f"{win['from']} → {win.get('to') or '…'}, "
+                                  f"TMDB {n_season} tập"
+                                  + (f", dọn {n_pruned} tập cũ sai" if n_pruned else "")
+                                  + ")")
+                            _mark_checked(DB, row)
+                            continue
                     if (split or {}).get("by_year"):
                         # TMDB dồn nhiều mùa → lấy tập có NGÀY CHIẾU đúng năm
                         # của entry AniList, đánh số lại 1..N. Tự kiểm số lượng
@@ -551,9 +625,23 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                             print(f"      + {len(eps)} tập (dồn mùa, tách theo "
                                   f"năm {row.get('year')} trong {n_season} tập TMDB)")
                         else:
-                            implausible.append(
-                                f"{label}  (dồn mùa nhưng năm {row.get('year')} "
-                                f"không khớp {row.get('episodes_total')} tập)")
+                            win = _airing_window(row)
+                            eps = tmdb.episode_rows_in_window(
+                                row["id"], season, win.get("from"), win.get("to"),
+                                row.get("episodes_total")) if win.get("from") else []
+                            if eps:
+                                DB.upsert("episodes", eps,
+                                          on_conflict="anime_id,number")
+                                eps_written += len(eps)
+                                print(f"      + {len(eps)} tập (theo khoảng chiếu "
+                                      f"{win['from']} → {win.get('to') or '…'}, "
+                                      f"TMDB {n_season} tập)")
+                            else:
+                                why = ("không đọc được ngày chiếu AniList: "
+                                       f"{win['error']}" if win.get("error") else
+                                       f"năm {row.get('year')} không khớp "
+                                       f"{row.get('episodes_total')} tập")
+                                implausible.append(f"{label}  (dồn mùa nhưng {why})")
                         _mark_checked(DB, row)
                         continue
 
@@ -571,6 +659,22 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                         max_number = tmdb.first_season_cut(
                             detail, season_no, hint_season, row.get("year"),
                             row.get("episodes_total"), season_count=n_season)
+                        if not max_number:
+                            # Ngày chiếu của CHÍNH entry AniList là ranh giới đúng
+                            # nhất khi TMDB gộp nhiều cour vào một season.
+                            win = _airing_window(row)
+                            eps_win = tmdb.episode_rows_in_window(
+                                row["id"], season, win.get("from"), win.get("to"),
+                                row.get("episodes_total")) if win.get("from") else []
+                            if eps_win:
+                                DB.upsert("episodes", eps_win,
+                                          on_conflict="anime_id,number")
+                                eps_written += len(eps_win)
+                                print(f"      + {len(eps_win)} tập (theo khoảng chiếu "
+                                      f"{win['from']} → {win.get('to') or '…'}, "
+                                      f"TMDB {n_season} tập)")
+                                _mark_checked(DB, row)
+                                continue
                         if not max_number:
                             # `seasons[].episode_count` trong detail TMDB hay LỆCH
                             # so với danh sách tập thật (báo 12 nhưng trả 24) →

@@ -24,6 +24,7 @@ class FakeDB:
         self.existing_episodes = existing_episodes or {}
         self.patched = []
         self.upserted = []
+        self.deleted = []
         self.logs = []
         self.dry = False
 
@@ -47,6 +48,10 @@ class FakeDB:
     def upsert(self, table, rows, on_conflict=None, fallback_per_row=False):
         self.upserted.append((table, list(rows)))
         return list(rows)
+
+    def delete(self, table, filters):
+        self.deleted.append((table, filters))
+        return 1
 
     def log_ingest(self, source, job, ok, rows, error=""):
         self.logs.append((source, job, ok, rows, error))
@@ -76,7 +81,8 @@ def _detail(seasons=(1,), total=24, meta=None):
 
 
 class TestJobTmdb(unittest.TestCase):
-    def _run(self, db, seasons=(1,), total=24, match=None, meta=None, eps=None):
+    def _run(self, db, seasons=(1,), total=24, match=None, meta=None, eps=None,
+             window=None):
         """Chạy job với TMDB giả. `match` cho phép mô phỏng không-khớp hoặc lỗi."""
         base_match = match or (lambda row: MATCH)
 
@@ -88,6 +94,8 @@ class TestJobTmdb(unittest.TestCase):
             return res
 
         with patch.object(tmdb, "is_configured", return_value=True), \
+             patch.object(ingest_main, "_airing_window",
+                          return_value=window or {}), \
              patch.object(tmdb, "match_anime", side_effect=match_fn), \
              patch.object(tmdb, "fetch_detail",
                           side_effect=lambda tv: _detail(seasons=seasons, total=total,
@@ -239,6 +247,88 @@ class TestJobTmdb(unittest.TestCase):
         _, out = self._run(db, seasons=(1,), total=24, meta=meta, eps=eps)
         self.assertEqual([u for u in db.upserted if u[0] == "episodes"], [])
         self.assertIn("không tách được", out)
+
+    def test_mua_tmdb_dai_hon_thi_cat_theo_khoang_chieu(self):
+        """Ca thật 02/11/2026: `yozakura-san-chi-no-daisakusen-2nd-season`.
+
+        TMDB 216467 có mùa 1 (2024) + mùa 2 **24 tập** (12/04/2026 →), AniList
+        tách 12 + 12 ("Part 2"). `first_season_cut` từ chối (tên ghi mùa 2),
+        `split_season_offset` từ chối (TMDB có 2 mùa), luật theo NĂM cũng trượt
+        (cả hai cour đều 2026) → trước đây bỏ trắng. Nay cắt bằng ngày chiếu
+        của chính entry AniList.
+        """
+        import datetime as dt
+        row = dict(ROW, episodes_total=12, year=2026,
+                   title_english="Mission: Yozakura Family Season 2")
+        eps, d = [], dt.date(2026, 4, 12)
+        for i in range(24):
+            eps.append({"episode_number": i + 1, "name": f"T{i+1}",
+                        "air_date": (d + dt.timedelta(days=7 * i)).isoformat()})
+        meta = {1: {"episode_count": 27, "air_date": "2024-04-07"},
+                2: {"episode_count": 24, "air_date": "2026-04-12"}}
+        db = FakeDB([row])
+        _, out = self._run(db, seasons=(1, 2), total=51, meta=meta, eps=eps,
+                           window={"from": dt.date(2026, 4, 12),
+                                   "to": dt.date(2026, 6, 28)})
+        upserts = [u for u in db.upserted if u[0] == "episodes"]
+        self.assertEqual(len(upserts), 1, out)
+        self.assertEqual([r["number"] for r in upserts[0][1]], list(range(1, 13)))
+        self.assertEqual(upserts[0][1][0]["title"], "T1")
+        self.assertIn("theo khoảng chiếu", out)
+        # không có tập nào nằm ngoài khoảng chiếu để dọn
+        deletes = [d for d in db.deleted if d[0] == "episodes"]
+        dates = [f for _, f in deletes]
+        self.assertTrue(all("lt.2026-01-12" in f.get("airing_at", "")
+                            or "gt.2026-09-26" in f.get("airing_at", "")
+                            for f in dates), dates)
+
+    def test_tap_cu_sai_nam_thi_xu_ly_lai_va_don(self):
+        """Ca thật 02/11/2026: `tensei-kizoku-…-3rd-season` (2026) đang có **36
+        tập** lấy từ TMDB season gộp (bắt đầu 07/04/2024) → tập của mùa 1+2 nằm
+        trong mùa 3. Job cũ thấy "đã có tập" nên bỏ qua vĩnh viễn.
+        """
+        import datetime as dt
+        row = dict(ROW, episodes_total=36, year=2026,
+                   title_english="As a Reincarnated Aristocrat… Season 3")
+        # TMDB: MỘT season 36 tập, 12 tập/năm 2024 · 2024 · 2026
+        eps, n = [], 1
+        for start, count in ((dt.date(2024, 4, 7), 12),
+                             (dt.date(2024, 10, 6), 12),
+                             (dt.date(2026, 10, 4), 12)):
+            for i in range(count):
+                eps.append({"episode_number": n, "name": f"T{n}",
+                            "air_date": (start + dt.timedelta(days=7 * i)).isoformat()})
+                n += 1
+        meta = {1: {"episode_count": 36, "air_date": "2024-04-07"}}
+        db = FakeDB([row], existing_episodes={5: [
+            {"number": 1, "airing_at": "2024-04-07T00:00:00+00:00"}]})
+        _, out = self._run(db, seasons=(1,), total=36, meta=meta, eps=eps,
+                           window={"from": dt.date(2026, 10, 4), "to": None})
+        upserts = [u for u in db.upserted if u[0] == "episodes"]
+        self.assertEqual(len(upserts), 1, out)
+        self.assertEqual([r["number"] for r in upserts[0][1]], list(range(1, 13)))
+        self.assertTrue(all(r["airing_at"].startswith("2026")
+                            for r in upserts[0][1]))
+        # dọn tập cũ nằm trước khoảng chiếu (chừa 90 ngày)
+        early = [f for t, f in db.deleted if t == "episodes" and "lt." in f.get("airing_at", "")]
+        self.assertEqual(len(early), 1, db.deleted)
+        self.assertIn("lt.2026-07-06", early[0]["airing_at"])
+
+    def test_khong_co_ngay_chieu_anilist_thi_bao_ro(self):
+        """Không đọc được ngày chiếu → KHÔNG ghi, và nói rõ vì sao (không im)."""
+        import datetime as dt
+        row = dict(ROW, episodes_total=12, year=2026,
+                   title_english="Mission: Yozakura Family Season 2")
+        eps = [{"episode_number": i + 1, "name": f"T{i+1}",
+                "air_date": (dt.date(2026, 4, 12) + dt.timedelta(days=7 * i)).isoformat()}
+               for i in range(24)]
+        meta = {1: {"episode_count": 27, "air_date": "2024-04-07"},
+                2: {"episode_count": 24, "air_date": "2026-04-12"}}
+        db = FakeDB([row])
+        _, out = self._run(db, seasons=(1, 2), total=51, meta=meta, eps=eps,
+                           window={})
+        self.assertEqual([u for u in db.upserted if u[0] == "episodes"], [])
+        self.assertIn("KHÔNG hợp", out)
 
     def test_khong_match_thi_khong_ghi_gi(self):
         db = FakeDB([dict(ROW)])
