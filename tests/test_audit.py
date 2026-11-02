@@ -180,6 +180,38 @@ class TestRun(unittest.TestCase):
         self.assertEqual(db2.deletes[0][1], {"id": 1})
         self.assertEqual(out2["pruned"], 1)
 
+    @staticmethod
+    def _hunter_rows(n=8):
+        """hunter-hunter: entry 1999 (62 tập) giữ video bản 2011 (tập > 62)."""
+        return [dict(ROW, id=i, episode_number=62 + i,
+                     url=f"https://youtu.be/AAAAAAAAAAA",
+                     source_title=f"Hunter x Hunter - Tập {62 + i}",
+                     anime={"slug": "hunter-hunter", "episodes_total": 62})
+                for i in range(1, n + 1)]
+
+    def test_chan_xoa_hang_loat_vi_nghi_sai_bo(self):
+        """Ca thật 02/11/2026: 86 link "vượt tổng" của hunter-hunter đều là video
+        THẬT của bản 2011 → `--prune-over-total` không được xoá."""
+        db, out, txt = self._run(self._hunter_rows(), fix=True, prune=True)
+        self.assertEqual(db.deletes, [], "quá 5 link/bộ → KHÔNG xoá")
+        self.assertEqual(out["pruned"], 0)
+        self.assertIn("GÁN SAI BỘ", txt)
+
+    def test_van_xoa_khi_duoi_nguong(self):
+        rows = [dict(ROW, id=1, episode_number=277,
+                     url="https://youtu.be/AAAAAAAAAAA",
+                     source_title="Fairy Tail - Tập 277",
+                     anime={"slug": "fairy-tail", "episodes_total": 175})]
+        db, out, _ = self._run(rows, fix=True, prune=True)
+        self.assertEqual(len(db.deletes), 1)
+        self.assertEqual(out["pruned"], 1)
+
+    def test_force_prune_thi_xoa_du_bi_chan(self):
+        db = FakeDB(self._hunter_rows())
+        with redirect_stdout(io.StringIO()):
+            audit.run(db, fix=True, prune_over_total=True, force_prune=True)
+        self.assertEqual(len(db.deletes), 8)
+
     def test_loc_theo_slug_trong_query(self):
         db, _, _ = self._run([dict(ROW)], slug="one-punch-man")
         self.assertIn("anime.slug=eq.one-punch-man", db.queries[0])

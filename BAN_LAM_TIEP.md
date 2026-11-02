@@ -428,6 +428,12 @@ python3 -m ingest.audit --fix                      # lưu source_title + sửa/x
 python3 -m ingest.audit --fix --prune-over-total   # xoá luôn link vượt tổng
 ```
 
+> ⛔ **Chốt an toàn 02/11/2026**: bộ nào có **> 5 link** vượt tổng thì
+> `--prune-over-total` **KHÔNG xoá**, chỉ in cảnh báo "GÁN SAI BỘ". Lý do:
+> `hunter-hunter` có 86 link như vậy nhưng tất cả là **video thật** của bản 2011
+> bị gắn vào entry bản 1999 — xoá là mất 86 video không lấy lại được. Muốn xoá
+> thật thì thêm `--force-prune`, và chỉ sau khi đã xem `ingest.reassign`.
+
 `--fix` cũng lưu `source_title` cho toàn bộ link cũ, nên lần sau audit chạy nhanh
 và không cần gọi mạng.
 
