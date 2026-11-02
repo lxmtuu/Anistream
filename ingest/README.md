@@ -90,7 +90,21 @@ lựa chọn **đáng tin nhất**. Hai chốt an toàn:
 
 - **không** đọc `Part 2` — đó là phần trong cùng một mùa TMDB, không phải mùa mới;
 - tên ghi mùa N mà TMDB **không** có mùa N → trả `None` (không rơi xuống đoán mò,
-  tránh gán tập mùa 1 cho entry mùa 2).
+  tránh gán tập mùa 1 cho entry mùa 2);
+- tên có `":"` thì **bỏ qua** phần số ở cuối — `Girls und Panzer: Saishuushou 5` là
+  phim lẻ phần 5, không phải mùa 5.
+
+Ngoài ra AniList hay dùng **dạng ngắn** cho mùa sau (`One Punch Man 2`,
+`Mob Psycho 100 II`, `Karakai Jouzu no Takagi-san 2`). Từ 02/11/2026
+`season_from_title` đọc cả số Ả Rập lẫn số La Mã ở **cuối tên**, chỉ nhận 2–9
+(số lớn hơn là số trong tên, ví dụ `Mob Psycho 100`).
+
+**Lọc năm trong `match_anime`** (cùng ngày): đây là tầng sâu hơn của cùng lỗi.
+AniList ghi **năm của mùa** (`One Punch Man 2` → 2019) còn TMDB ghi **năm mùa 1**
+(2015) → lệch 4 năm > `YEAR_TOLERANCE=2` ⇒ loại sạch kết quả ⇒ không có `tmdb_id`
+⇒ **25/53 bộ 0 tập chưa từng khớp được TMDB**. Nay nếu tên cho biết mùa ≥ 2 thì
+`match_anime` **bỏ lọc năm** (vẫn giữ ngưỡng tên 0.80), bộ không ghi mùa vẫn lọc
+năm như cũ.
 
 ### Job H — `reassign`: link bị gán sai mùa
 

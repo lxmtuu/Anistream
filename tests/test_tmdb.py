@@ -340,7 +340,9 @@ class TestSeasonFromTitle(unittest.TestCase):
             "Ao no Hako Season 2": 2,
             "Tensei Shitara Ken Deshita 2nd Season": 2,
             "Kusuriya no Hitorigoto 3rd Season": 3,
-            "Karakai Jouzu no Takagi-san 2": None,
+            # HỒI QUY 02/11/2026: tên dạng ngắn "… 2" CHÍNH LÀ mùa 2. Trước đây
+            # trả None ⇒ job D không chọn được mùa ⇒ bộ 0 tập dù TMDB có đủ.
+            "Karakai Jouzu no Takagi-san 2": 2,
             "PetitCure: Precure Fairies Season 4": 4,
             "Bộ phim - Mùa 2": 2,
         }
@@ -380,3 +382,32 @@ class TestPickSeasonTheoTen(unittest.TestCase):
         so, why = tmdb.pick_season(self.D, 2025, 24, season_hint=5)
         self.assertIsNone(so)
         self.assertIn("mùa 5", why)
+
+
+class TestMuaTuTenDangNgan(unittest.TestCase):
+    """AniList hay dùng dạng ngắn cho mùa 2/3 — trước đây không đọc được.
+
+    Đo 02/11/2026: "One Punch Man 2", "Mob Psycho 100 II", "Karakai Jouzu no
+    Takagi-san 2" đều trả None ⇒ job D không biết chọn mùa nào ⇒ 0 tập.
+    """
+
+    def test_so_o_cuoi(self):
+        self.assertEqual(tmdb.season_from_title("One Punch Man 2"), 2)
+        self.assertEqual(tmdb.season_from_title("Karakai Jouzu no Takagi-san 2"), 2)
+
+    def test_so_la_ma(self):
+        self.assertEqual(tmdb.season_from_title("Mob Psycho 100 II"), 2)
+        self.assertEqual(tmdb.season_from_title("Some Show III"), 3)
+
+    def test_so_lon_khong_phai_mua(self):
+        """"Mob Psycho 100" là số 100 trong TÊN, không phải mùa 100."""
+        self.assertIsNone(tmdb.season_from_title("Mob Psycho 100"))
+        self.assertIsNone(tmdb.season_from_title("Ranma 1/2"))
+
+    def test_khong_doan_khi_co_dau_hai_cham(self):
+        """"Girls und Panzer: Saishuushou 5" là phần 5 của phim, không phải mùa TV."""
+        self.assertIsNone(tmdb.season_from_title("Girls und Panzer: Saishuushou 5"))
+
+    def test_van_doc_dung_dang_day_du(self):
+        self.assertEqual(tmdb.season_from_title("Dandadan 2nd Season"), 2)
+        self.assertEqual(tmdb.season_from_title("Kusuriya no Hitorigoto 3rd Season"), 3)

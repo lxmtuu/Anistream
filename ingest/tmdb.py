@@ -342,6 +342,12 @@ SEASON_IN_TITLE = (
     re.compile(r"m[ùu]a\s*(\d+)", re.IGNORECASE),
 )
 
+# Dạng ngắn mà AniList hay dùng cho mùa 2/3: "One Punch Man 2", "Mob Psycho 100 II",
+# "Karakai Jouzu no Takagi-san 2". Đây là các entry MÙA, không phải bộ khác.
+_ROMAN = {"II": 2, "III": 3, "IV": 4, "V": 5}
+_TRAILING_NUM = re.compile(r"\s(\d{1,2})$")
+_TRAILING_ROMAN = re.compile(r"\s(II|III|IV|V)$")
+
 
 def season_from_title(*titles: Optional[str]) -> Optional[int]:
     """Đọc số mùa từ TÊN bộ: "… 2nd Season", "Season 2", "Mùa 2" → 2.
@@ -362,6 +368,23 @@ def season_from_title(*titles: Optional[str]) -> Optional[int]:
                 n = int(m.group(1))
                 if 1 <= n <= 30:
                     return n
+        # "… 2" / "… II" ở CUỐI tên. Chỉ nhận 2..9 (mùa 1 viết "… 1" gần như
+        # không có) và bỏ qua số > 30 để "Mob Psycho 100" không thành mùa 100.
+        # Có dấu ":" là tên phim/phần đặc biệt ("Girls und Panzer: Saishuushou 5"
+        # là PHẦN 5 của phim điện ảnh, không phải mùa TV) → không đoán.
+        if ":" in t:
+            continue
+        # "Part 2"/"Phần 2" là cour trong CÙNG một mùa TMDB → không phải mùa mới.
+        if re.search(r"\b(part|phần)\s*\d+\s*$", t, re.IGNORECASE):
+            continue
+        m = _TRAILING_ROMAN.search(t)
+        if m:
+            return _ROMAN[m.group(1)]
+        m = _TRAILING_NUM.search(t)
+        if m:
+            n = int(m.group(1))
+            if 2 <= n <= 9:
+                return n
     return None
 
 
@@ -433,22 +456,30 @@ def match_anime(row: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], float, s
     titles = [t for t in titles if t]
     year = row.get("year")
 
+    # Bộ có tên ghi mùa 2/3 ("One Punch Man 2", "Dandadan 2nd Season") thì NĂM của
+    # AniList là năm mùa đó, còn `first_air_date` của TMDB là năm MÙA 1 → lọc theo
+    # năm sẽ loại sạch (đo 02/11/2026: "One Punch Man 2" 2019 vs TMDB 2015, lệch 4
+    # > tolerance 2 → 25 bộ FINISHED không khớp được TMDB nên 0 tập).
+    hint = season_from_title(*titles)
+    year_filter = None if (hint and hint > 1) else year
+
     tried = []
     for t in titles:
         params: Dict[str, Any] = {"query": t}
-        if year:
+        if year and year_filter is not None:
             params["first_air_date_year"] = year
         res = _get("/search/tv", params).get("results") or []
         tried.append(f"search[{t[:24]}]")
-        best, score = pick_best(res, titles, year)
+        best, score = pick_best(res, titles, year_filter)
         if best:
             return best, score, tried[-1]
-        # lần 2: bỏ ràng buộc năm (TMDB hay lệch năm với AniList)
-        if year:
+        # lần 2: bỏ ràng buộc năm (TMDB hay lệch năm với AniList). Nếu đã bỏ lọc
+        # năm từ đầu (hint mùa ≥2) thì lần 2 là request y hệt → không gọi lại.
+        if year and year_filter is not None:
             time.sleep(SLEEP_BETWEEN)
             res2 = _get("/search/tv", {"query": t}).get("results") or []
             tried.append(f"search-noyear[{t[:24]}]")
-            best2, score2 = pick_best(res2, titles, year)
+            best2, score2 = pick_best(res2, titles, year_filter)
             if best2:
                 return best2, score2, tried[-1]
         time.sleep(SLEEP_BETWEEN)

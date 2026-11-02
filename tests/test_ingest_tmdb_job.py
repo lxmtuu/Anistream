@@ -324,3 +324,38 @@ class TestGoiYMuaTuTen(unittest.TestCase):
         })
         db, eps = self._run(row, detail, season_eps=12)
         self.assertEqual(eps, [], "không được gán tập mùa khác khi tên ghi mùa 5")
+
+
+class TestMatchSequelKhongBiLocNam(unittest.TestCase):
+    """25 bộ FINISHED 0 tập vì `match_anime` lọc NĂM.
+
+    AniList ghi năm của MÙA ("One Punch Man 2" → 2019), TMDB ghi năm MÙA 1
+    (2015) → lệch 4 > YEAR_TOLERANCE 2 → loại sạch, không có tmdb_id, không tập.
+    """
+
+    def test_mua_2_khop_du_nam_lech(self):
+        from ingest import tmdb as t
+        row = {"title_romaji": "One Punch Man 2", "title_english": None,
+               "title_native": None, "year": 2019}
+        results = [{"id": 63926, "name": "One-Punch Man",
+                    "original_name": "One Punch Man",
+                    "first_air_date": "2015-09-20", "popularity": 80}]
+        with patch.object(t, "_get", return_value={"results": results}), \
+                patch.object(t.time, "sleep"):
+            best, score, how = t.match_anime(row)
+        self.assertIsNotNone(best, "mùa 2 phải khớp được TMDB")
+        self.assertGreaterEqual(score, 0.8)
+        self.assertIn("One Punch Man 2", how)
+
+    def test_bo_khong_phai_mua_van_loc_nam(self):
+        """Bộ thường (không ghi mùa) vẫn phải lọc năm — tránh nhầm bộ khác."""
+        from ingest import tmdb as t
+        row = {"title_romaji": "Naruto", "title_english": None,
+               "title_native": None, "year": 2002}
+        results = [{"id": 1, "name": "Naruto Shippuden",
+                    "original_name": "Naruto Shippuden",
+                    "first_air_date": "2007-02-15", "popularity": 90}]
+        with patch.object(t, "_get", return_value={"results": results}), \
+                patch.object(t.time, "sleep"):
+            best, _, _ = t.match_anime(row)
+        self.assertIsNone(best, "Naruto vs Naruto Shippuden: lệch 5 năm → phải loại")
