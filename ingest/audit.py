@@ -176,9 +176,16 @@ def count_other_regions(DB, keep: str) -> int:
     return len(rows)
 
 
+# Một bộ có NHIỀU link vượt tổng thường là **gán sai bộ** (HUNTER×HUNTER 1999
+# giữ 148 video của bản 2011), không phải sai số tập. Xoá hàng loạt = mất video
+# thật mà không lấy lại được, nên chặn ở ngưỡng này.
+PRUNE_GUARD = 5
+
+
 def run(DB, slug: str = "", limit: int = 0, fix: bool = False,
         prune_over_total: bool = False, channel: str = "",
-        title_fetcher: Callable[[str], Optional[str]] = fetch_title) -> Dict[str, int]:
+        title_fetcher: Callable[[str], Optional[str]] = fetch_title,
+        force_prune: bool = False) -> Dict[str, int]:
     print("\n▶ Audit streaming_links — có link nào gán sai số tập?")
     region = CHANNEL_REGION.get(channel, channel)
     if region:
@@ -251,6 +258,12 @@ def run(DB, slug: str = "", limit: int = 0, fix: bool = False,
         return {"link": total, "bad": bad, **counts}
 
     # ── ghi thật ──
+    over_by_slug: Dict[str, int] = {}
+    for f in findings:
+        if f["action"] == "vuot_tong":
+            over_by_slug[f["slug"]] = over_by_slug.get(f["slug"], 0) + 1
+    blocked = {s for s, n in over_by_slug.items() if n > PRUNE_GUARD}
+    skipped: Dict[str, int] = {}
     fixed_title = fixed_ep = deleted = pruned = 0
     for row in rows:
         if row.get("source_title") and row["id"] not in had_title:
@@ -267,8 +280,21 @@ def run(DB, slug: str = "", limit: int = 0, fix: bool = False,
                      {"episode_number": int(f["new_episode"])})
             fixed_ep += 1
         elif f["action"] == "vuot_tong" and prune_over_total:
+            if f["slug"] in blocked and not force_prune:
+                skipped[f["slug"]] = skipped.get(f["slug"], 0) + 1
+                continue
             DB.delete("streaming_links", {"id": f["id"]})
             pruned += 1
+
+    if skipped:
+        print(f"\n  ⛔ KHÔNG xoá {sum(skipped.values())} link vượt tổng của "
+              f"{len(skipped)} bộ — mỗi bộ vượt quá {PRUNE_GUARD} link:")
+        for s_, n in sorted(skipped.items(), key=lambda kv: -kv[1]):
+            print(f"      - {s_}: {n} link")
+        print("     Đây thường là GÁN SAI BỘ (ví dụ HUNTER×HUNTER 1999 giữ video "
+              "bản 2011),\n     không phải sai số tập. Xoá là mất video thật.")
+        print("     → xem `python3 -m ingest.reassign` (chuyển/dời số) trước;")
+        print("     → chỉ khi chắc chắn: thêm --force-prune")
 
     if region:
         others = count_other_regions(DB, region)
@@ -302,6 +328,9 @@ def main(argv=None) -> int:
                     help="GHI: lưu source_title, sửa số tập, xoá link rác")
     ap.add_argument("--prune-over-total", action="store_true",
                     help="kèm --fix: xoá luôn link vượt tổng số tập AniList")
+    ap.add_argument("--force-prune", action="store_true",
+                    help=f"xoá cả bộ có > {PRUNE_GUARD} link vượt tổng "
+                         "(mặc định CHẶN vì thường là gán sai bộ)")
     ap.add_argument("--channel", default="",
                     help="chỉ xét 1 kênh: muse_vn | ani_one_asia "
                          "(kèm --fix sẽ XOÁ link của kênh khác)")
@@ -314,7 +343,7 @@ def main(argv=None) -> int:
         return 2
     try:
         run(DB, args.slug, args.limit, args.fix, args.prune_over_total,
-            args.channel)
+            args.channel, force_prune=args.force_prune)
     except KeyboardInterrupt:
         print("\n… dừng theo yêu cầu")
         return 130

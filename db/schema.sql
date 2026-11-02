@@ -30,7 +30,9 @@ create table if not exists anime (
   anilist_id      bigint      unique,                   -- khóa ngoại chuẩn
   mal_id          bigint      unique,
   kitsu_id        text        unique,
-  tmdb_id         bigint      unique,
+  tmdb_id         bigint,                               -- KHÔNG unique: nhiều
+                                                        -- mùa AniList dùng chung
+                                                        -- 1 series TMDB
 
   title_romaji    text        not null,
   title_english   text,

@@ -398,6 +398,7 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
 
     patched = eps_written = new_episodes = 0
     no_match, no_vi, multi_season, implausible = [], [], [], []
+    patch_errors: list = []
     for i, row in enumerate(rows, 1):
         label = (row.get("title_english") or row.get("title_romaji") or row.get("slug"))[:46]
         try:
@@ -432,8 +433,14 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
             patch = tmdb.build_anime_patch(row, detail, title_vi, overview_vi,
                                            matched, episodes_total_hint=hint)
             if patch:
-                DB.patch("anime", {"id": row["id"]}, patch)
-                patched += 1
+                # Lỗi ghi hồ sơ KHÔNG được chặn phần danh sách tập phía dưới:
+                # trước đây một 409 (tmdb_id trùng) làm cả bộ bị bỏ, nên 13 bộ
+                # vừa có tmdb_id lại vừa 0 tập (đo 02/11/2026).
+                try:
+                    DB.patch("anime", {"id": row["id"]}, patch)
+                    patched += 1
+                except Exception as e:            # noqa: BLE001 — cần biết mọi kiểu
+                    patch_errors.append(f"{label}  ({str(e)[:90]})")
                 chi_tiet = ", ".join(
                     f"{k}={v}" for k, v in patch.items() if k in ("title_vi", "episodes_total")
                 ) or ", ".join(sorted(patch))
@@ -499,6 +506,10 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
         print(f"  ⚠ {len(implausible)} anime có danh sách tập TMDB KHÔNG hợp với AniList "
               f"→ không ghi (tránh gán sai):")
         for n in implausible[:8]:
+            print(f"      - {n}")
+    if patch_errors:
+        print(f"  ⚠ {len(patch_errors)} anime KHÔNG ghi được hồ sơ (vẫn thử lấy tập):")
+        for n in patch_errors[:8]:
             print(f"      - {n}")
 
     job_name = "refresh" if refresh else "enrich"

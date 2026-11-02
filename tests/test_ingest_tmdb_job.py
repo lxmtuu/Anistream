@@ -359,3 +359,60 @@ class TestMatchSequelKhongBiLocNam(unittest.TestCase):
                 patch.object(t.time, "sleep"):
             best, _, _ = t.match_anime(row)
         self.assertIsNone(best, "Naruto vs Naruto Shippuden: lệch 5 năm → phải loại")
+
+
+class TestLoiGhiHoSoKhongChanDanhSachTap(unittest.TestCase):
+    """Ca thật 02/11/2026: 13 bộ bị 409 `anime_tmdb_id_key` khi ghi hồ sơ, và vì
+    `DB.patch` ném lỗi nên job bỏ luôn phần danh sách tập của chính bộ đó.
+
+    Nay lỗi ghi hồ sơ chỉ được ghi nhận; danh sách tập vẫn phải được lấy.
+    """
+
+    def test_patch_hong_van_ghi_tap(self):
+        from ingest import main as m
+        from ingest import tmdb as t
+
+        class DB:
+            dry = False
+            def __init__(self):
+                self.upserts, self.patches = [], []
+            def select(self, table, query):
+                if table == "anime":
+                    return self.select_all("anime", query)
+                return []          # bảng episodes: chưa có tập nào
+            def select_all(self, table, query, page_size=1000, max_rows=200000):
+                return [{"id": 7, "slug": "x", "title_romaji": "X S2",
+                         "title_english": "X Season 2", "title_native": None,
+                         "title_vi": None, "synopsis_vi": None, "year": 2019,
+                         "episodes_total": 12, "tmdb_id": None}]
+            def patch(self, table, filters, values):
+                raise RuntimeError('patch anime lỗi 409: duplicate key')
+            def upsert(self, table, rows, on_conflict=None,
+                       fallback_per_row=False):
+                self.upserts.append((table, rows))
+                return list(rows)
+            def log_ingest(self, *a, **k):
+                pass
+
+        detail = {"id": 99, "name": "X", "seasons": [
+            {"season_number": 1, "episode_count": 12, "air_date": "2015-01-01"},
+            {"season_number": 2, "episode_count": 12, "air_date": "2019-01-01"}]}
+        season = {"episodes": [
+            {"episode_number": i, "air_date": "2019-01-0%d" % (i % 9 + 1),
+             "name": f"Episode {i}"} for i in range(1, 13)]}
+
+        db = DB()
+        with patch.object(t, "is_configured", return_value=True), \
+                patch.object(t, "match_anime", return_value=(
+                    {"id": 99, "name": "X"}, 0.95, "search[X]")), \
+                patch.object(t, "fetch_detail", return_value=detail), \
+                patch.object(t, "fetch_season", return_value=season), \
+                patch.object(t, "extract_vietnamese", return_value=(None, None)), \
+                patch.object(t.time, "sleep"):
+            m.job_tmdb(db, limit=1)
+
+        tables = [u[0] for u in db.upserts]
+        self.assertIn("episodes", tables,
+                      "409 khi ghi hồ sơ KHÔNG được chặn danh sách tập")
+        eps = next(rows for name, rows in db.upserts if name == "episodes")
+        self.assertEqual([e["number"] for e in eps], list(range(1, 13)))
