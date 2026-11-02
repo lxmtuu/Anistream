@@ -792,7 +792,8 @@ class TestChiDinhSlug(unittest.TestCase):
         db = FakeDB([dict(ROW)])
         calls = []
 
-        def fake(db_, limit, with_episodes=True, refresh=False, only_slug=""):
+        def fake(db_, limit, with_episodes=True, refresh=False, only_slug="",
+                 force=False):
             calls.append(only_slug)
             return 0
 
@@ -809,3 +810,37 @@ class TestChiDinhSlug(unittest.TestCase):
         db = FakeDB([dict(ROW, tmdb_checked_at=vua_hoi)])
         self._run(db)
         self.assertEqual(db.patched, [])
+
+
+class TestForceQuaHan(unittest.TestCase):
+    """`tmdb --force`: chạy lại ngay sau khi SỬA CÁCH ĐỌC TMDB.
+
+    Bản vá `title_vi` (02/11/2026) chỉ có tác dụng nếu job ghé lại các bộ đã hỏi
+    TMDB hôm nay; không có `--force` thì phải chờ 7 ngày.
+    """
+
+    def _run(self, db, **kw):
+        with patch.object(tmdb, "is_configured", return_value=True), \
+             patch.object(tmdb, "match_anime", return_value=MATCH), \
+             patch.object(tmdb, "fetch_detail",
+                          side_effect=lambda tv: _detail(total=24)), \
+             patch.object(tmdb, "fetch_season", return_value={"episodes": []}), \
+             redirect_stdout(io.StringIO()) as buf:
+            n = ingest_main.job_tmdb(db, **kw)
+        return n, buf.getvalue()
+
+    def test_force_bo_qua_han_da_hoi(self):
+        import datetime as dt
+        vua_hoi = dt.datetime.now(dt.timezone.utc).isoformat()
+        db = FakeDB([dict(ROW, tmdb_checked_at=vua_hoi)])
+        _, out = self._run(db, force=True)
+        real = [p for p in db.patched if "tmdb_checked_at" not in p[2]]
+        self.assertEqual(len(real), 1, "force phải xử lý dù vừa hỏi hôm nay")
+        self.assertIn("bỏ hạn", out)
+
+    def test_force_dien_lai_title_vi_khi_con_trong(self):
+        """Cột `title_vi` rỗng vẫn được ghi dù `synopsis_vi` đã có."""
+        db = FakeDB([dict(ROW, synopsis_vi="đã có", tmdb_checked_at=None)])
+        self._run(db, force=True)
+        real = [p for p in db.patched if "tmdb_checked_at" not in p[2]]
+        self.assertEqual(real[0][2].get("title_vi"), "Dược Sư Tự Sự")
