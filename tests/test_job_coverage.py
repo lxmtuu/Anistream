@@ -60,6 +60,16 @@ class TestJobCoverage(unittest.TestCase):
         self.assertEqual(n, 1, "không có tập nào có video ⇒ vẫn là chỉ metadata")
         self.assertIn("0/1 (0.0%)", out)
 
+    def test_dem_bo_co_video_nhung_thieu_tap(self):
+        """`shangri-la-frontier` 4/25: có video nhưng thiếu 21 tập — phải báo."""
+        db = FakeDB([A(1, "thieu", total=25)],
+                    eps=[(1, n) for n in range(1, 26)],
+                    links=[(1, n) for n in range(1, 5)])
+        n, out = self._run(db)
+        self.assertEqual(n, 1)
+        self.assertIn("thiếu 21 tập", out)
+        self.assertIn("4/25", out)
+
     def test_dry_run_bo_qua(self):
         db = FakeDB([A(1, "x")])
         db.dry = True
