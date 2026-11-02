@@ -101,6 +101,49 @@ class TestCollect(unittest.TestCase):
         self.assertEqual(qa.collect(FakeDB(ANIME, [], []))["soft"]["bo_khong_biet_tong"], 1)
 
 
+class TestKiemTraMoi(unittest.TestCase):
+    """Hai kiểm tra thêm 02/11/2026, đều từ lỗi THẬT đã xảy ra trên DB."""
+
+    def test_tap_trung_ngay_chieu_bi_canh_bao(self):
+        """`tensei-…-3rd-season` từng có 24 dòng: 1..12 và 25..36 CÙNG ngày."""
+        anime = [{"id": 1, "slug": "tensei-3rd", "episodes_total": 36,
+                  "status": "RELEASING"}]
+        days = [f"2026-{m:02d}-{d:02d}T00:00:00Z"
+                for m, d in ((9, 27), (10, 4), (10, 11), (10, 18), (10, 26),
+                             (11, 1), (11, 8), (11, 15), (11, 22), (11, 29),
+                             (12, 6), (12, 13))]
+        eps = [{"anime_id": 1, "number": n, "airing_at": day}
+               for n, day in zip(range(1, 13), days)]
+        # 25..36 dùng đúng 12 ngày đó → chắc chắn là bản trùng
+        eps += [{"anime_id": 1, "number": n, "airing_at": day}
+                for n, day in zip(range(25, 37), days)]
+        v = qa.collect(FakeDB(anime, eps, []))
+        self.assertTrue(v["soft"]["tap_trung_ngay_chieu"], v["soft"])
+
+    def test_hai_tap_cung_ngay_nhung_dung_tong_thi_khong_bao(self):
+        """Double-episode thật (13 tập / 13 dòng, 2 tập trùng ngày) → không cảnh báo."""
+        anime = [{"id": 1, "slug": "chitose", "episodes_total": 13,
+                  "status": "FINISHED"}]
+        eps = [{"anime_id": 1, "number": n, "airing_at": f"2025-10-{n:02d}T00:00:00Z"}
+               for n in range(1, 14)]
+        eps[12]["airing_at"] = eps[11]["airing_at"]
+        v = qa.collect(FakeDB(anime, eps, []))
+        self.assertEqual(v["soft"]["tap_trung_ngay_chieu"], [])
+
+    def test_bo_hoan_thanh_trang_trang_bi_bao(self):
+        """Bộ FINISHED, biết tổng, 0 tập, 0 video → app mở ra trang rỗng."""
+        anime = [{"id": 1, "slug": "trang", "episodes_total": 12,
+                  "status": "FINISHED"}]
+        v = qa.collect(FakeDB(anime, [], []))
+        self.assertEqual(v["soft"]["bo_hoan_thanh_0_tap"], ["trang"])
+
+    def test_bo_dang_chieu_0_tap_thi_khong_bao(self):
+        anime = [{"id": 1, "slug": "sap-chieu", "episodes_total": 12,
+                  "status": "RELEASING"}]
+        v = qa.collect(FakeDB(anime, [], []))
+        self.assertEqual(v["soft"]["bo_hoan_thanh_0_tap"], [])
+
+
 class TestJobCheck(unittest.TestCase):
     def _run(self, db, strict=True):
         buf = io.StringIO()

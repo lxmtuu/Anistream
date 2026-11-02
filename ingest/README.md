@@ -72,6 +72,7 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 | F | `jikan` | Jikan/MAL → lấp tập còn thiếu (`--fill-gaps`: cả bộ thiếu vài tập) | hằng ngày |
 | G | `add --anilist <id>` | **thêm đúng 1 bộ** từ AniList (bộ job khác không gặp) | chạy tay |
 | G' | `check` | **kiểm bất biến dữ liệu**, vi phạm cứng → job ĐỎ | hằng ngày |
+| — | `check` (cảnh báo mới) | tập **trùng ngày chiếu** (nghi đánh số lại) · bộ FINISHED **trang trống** | hằng ngày |
 | H | `reassign` | chuyển link bị gán **sai mùa** sang đúng mùa · `--move-all` dời cả playlist | chạy tay |
 
 `all` = A + B + C + C' + D + D' + E + F + G. (`reassign` chạy tay — xem dưới.)
@@ -359,6 +360,16 @@ Nó in **mọi** chuỗi đã tìm, số kết quả, và từng kết quả kè
 ứng viên đạt ngưỡng thì in tiếp **từng mùa** (số tập + ngày chiếu) và kết luận
 `✓ CHỌN mùa N` / `✗ TỪ CHỐI: <lý do>`. Đủ để biết bị loại vì lệch tên, lệch năm,
 TMDB không có mùa đó, hay số tập không khớp.
+
+### Job G' — hai cảnh báo mới của `check` (02/11/2026)
+
+* **tập trùng ngày chiếu**: `tensei-kizoku-…-3rd-season` từng có 24 dòng (1..12 và
+  25..36 **cùng 12 ngày**) mà không chỗ nào báo. Luật hiện tại: chỉ cảnh báo khi
+  có **≥3 dòng dư** so với số ngày chiếu **và** số dòng ≠ `episodes_total` — nhờ
+  vậy double-episode thật (`chitose` 13 tập / 12 ngày, `tensei-goblin` tập 5–6
+  khác giờ, `fool-night` 3 tập cùng ngày do AniList phát một lượt) không bị làm ồn.
+* **bộ FINISHED mà trang TRỐNG**: đã chiếu xong, biết tổng số tập, nhưng 0 tập và
+  0 video → app mở ra trang rỗng. Không phải lỗi dữ liệu, nhưng phải nhìn thấy.
 
 ### Job H — `reassign`: link bị gán sai mùa
 
