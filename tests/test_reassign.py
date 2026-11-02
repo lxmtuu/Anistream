@@ -140,3 +140,49 @@ class TestApply(unittest.TestCase):
             with redirect_stdout(io.StringIO()) as buf:
                 reassign.main([])
         self.assertIn("chưa ghi gì", buf.getvalue())
+
+
+class TestDoiSoTrongCungEntry(unittest.TestCase):
+    """Ca thật 02/11/2026: `seihantai-na-kimi-to-boku-2nd-season` (13 tập) giữ
+    link số **24**, trong khi mùa 1 (12 tập) đứng ngay trước → 24 − 12 = 12."""
+
+    def test_doi_so_khi_mua_truoc_nam_ngay_truoc(self):
+        animes = [anime(1, "seihantai-na-kimi-to-boku", 12),
+                  anime(2, "seihantai-na-kimi-to-boku-2nd-season", 13)]
+        links = [{"id": 9, "anime_id": 2, "episode_number": 24}]
+        p = reassign.plan(FakeDB(animes, links))
+        self.assertEqual(len(p), 1)
+        self.assertTrue(p[0]["renumber"])
+        self.assertEqual(p[0]["to_id"], 2)          # vẫn entry đó
+        self.assertEqual(p[0]["mapped"], [12])
+        self.assertEqual(p[0]["confidence"], "probable")
+
+    def test_khong_doi_khi_so_moi_de_len_tap_dang_co(self):
+        """Nếu số mới trùng tập đang có → đây là khai THIẾU tổng, không phải
+        đánh số tiếp nối. Thà bỏ còn hơn đè tập thật."""
+        animes = [anime(1, "x", 12), anime(2, "x-2nd-season", 13)]
+        links = [{"id": 9, "anime_id": 2, "episode_number": 24},
+                 {"id": 10, "anime_id": 2, "episode_number": 12}]
+        p = reassign.plan(FakeDB(animes, links))
+        self.assertFalse([e for e in p if e.get("renumber")])
+
+    def test_khong_doi_khi_khong_co_mua_truoc(self):
+        """HUNTER×HUNTER: không mùa sau, cũng không mùa trước → bó tay."""
+        animes = [anime(1, "hunter-hunter", 62)]
+        links = [{"id": 5, "anime_id": 1, "episode_number": 63}]
+        p = reassign.plan(FakeDB(animes, links))
+        self.assertFalse([e for e in p if e.get("renumber")])
+
+    def test_apply_chi_doi_so_khong_doi_anime(self):
+        animes = [anime(1, "y", 12), anime(2, "y-2nd-season", 13)]
+        links = [{"id": 9, "anime_id": 2, "episode_number": 24}]
+        DB = FakeDB(animes, links)
+        # apply() tự gọi job_link_episodes để tạo tập từ link; FakeDB.upsert
+        # nhận mọi thứ nên không cần chặn.
+        with redirect_stdout(io.StringIO()):
+            n = reassign.apply(DB, reassign.plan(DB))
+        self.assertEqual(n, 1)
+        table, filt, vals = DB.patches[0]
+        self.assertEqual(table, "streaming_links")
+        self.assertEqual(vals["episode_number"], 12)
+        self.assertEqual(vals["anime_id"], 2)

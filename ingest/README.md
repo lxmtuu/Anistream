@@ -117,6 +117,17 @@ nhưng AniList tách "FAIRY TAIL" (175) và "FAIRY TAIL (2014)" (102). Ingest g�
 277 video vào entry mùa 1 → 102 link vượt tổng bị chốt chặn loại ⇒ **102 video
 không ai xem được** (mùa 1 hiện 66 tập trong khi Muse có 277).
 
+Có **hai** kiểu lệch, job xử lý cả hai:
+
+| kiểu | ví dụ thật (02/11/2026) | cách sửa |
+|---|---|---|
+| link thuộc **mùa sau** | `shangri-la-frontier` giữ tập 26, 41 (bộ chỉ 25) | chuyển sang `shangri-la-frontier-2nd-season`, số − 25 |
+| số tập **tiếp nối nhưng entry đã đúng mùa** | `seihantai-na-kimi-to-boku-2nd-season` (13 tập) giữ tập 24 | dời số **trong cùng entry**: 24 − 12 = 12 |
+
+Luật dời số chỉ chạy khi tìm được entry mùa trước **theo slug** (`…-2nd-season`
+→ `…`), mọi số sau khi dời nằm trong `[1, episodes_total]`, và **không trùng** số
+tập đang có (trùng = bộ bị khai thiếu tổng, không phải đánh số tiếp nối → bỏ).
+
 ```bash
 python3 -m ingest.reassign                 # chỉ in kế hoạch
 python3 -m ingest.reassign --apply --only-exact   # an toàn nhất

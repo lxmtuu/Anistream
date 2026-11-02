@@ -42,6 +42,59 @@ def _candidates(parent: Dict, all_anime: List[Dict],
     return out
 
 
+def _parent_season(parent: Dict, all_anime: List[Dict]) -> Optional[Dict]:
+    """Entry "mùa trước" của `parent` suy từ slug: `x-2nd-season` → `x`.
+
+    Lấy slug DÀI NHẤT khớp tiền tố để `a-b-2nd-season` không nhận nhầm `a`.
+    """
+    slug = parent.get("slug") or ""
+    best = None
+    for a in all_anime:
+        s = a.get("slug") or ""
+        if not s or s == slug or not slug.startswith(s + "-"):
+            continue
+        total = a.get("episodes_total")
+        if not isinstance(total, int) or total <= 0:
+            continue
+        if best is None or len(s) > len(best.get("slug") or ""):
+            best = a
+    return best
+
+
+def _renumber(parent: Dict, all_anime: List[Dict], bad: List[Dict],
+              used_nums: Dict[int, set]) -> Optional[Dict[str, Any]]:
+    """Dời số tập trong CÙNG entry. Rất bảo thủ:
+
+    · phải tìm được entry mùa trước theo slug (offset = số tập mùa đó);
+    · MỌI số sau khi dời phải nằm trong [1, episodes_total của chính nó];
+    · số mới KHÔNG được trùng số đã có (nếu trùng thì đây là bộ bị khai thiếu
+      tổng, không phải đánh số tiếp nối) → bỏ.
+    """
+    prev = _parent_season(parent, all_anime)
+    if not prev:
+        return None
+    offset = int(prev["episodes_total"])
+    total = parent.get("episodes_total")
+    if not isinstance(total, int) or total <= 0:
+        return None
+    mapped = [int(l["episode_number"]) - offset for l in bad]
+    if min(mapped) < 1 or max(mapped) > total:
+        return None
+    taken = used_nums.get(parent["id"], set()) - set(
+        int(l["episode_number"]) for l in bad)
+    if taken & set(mapped):
+        return None                      # đè lên tập đang có → không đụng
+    contiguous = len(set(mapped)) == len(mapped) and \
+        sorted(mapped)[-1] - sorted(mapped)[0] + 1 == len(mapped)
+    return {
+        "offset": offset,
+        "links": [l["id"] for l in bad],
+        "mapped": mapped,
+        "confidence": "exact" if (contiguous and min(mapped) == 1
+                                  and max(mapped) == total) else "probable",
+    }
+
+
 def plan(DB) -> List[Dict[str, Any]]:
     """Tính kế hoạch chuyển link. Không ghi gì."""
     anime = DB.select_all(
@@ -54,10 +107,13 @@ def plan(DB) -> List[Dict[str, Any]]:
 
     busy: Dict[int, bool] = {a["id"]: False for a in anime}
     over: Dict[int, List[Dict]] = {}
+    used_nums: Dict[int, set] = {}
     for l in links:
         aid = l.get("anime_id")
         if aid in busy:
             busy[aid] = True
+        if aid is not None and (l.get("episode_number") or 0) > 0:
+            used_nums.setdefault(aid, set()).add(int(l["episode_number"]))
         a = by_id.get(aid)
         total = (a or {}).get("episodes_total")
         if not a or not isinstance(total, int) or total <= 0:
@@ -84,6 +140,26 @@ def plan(DB) -> List[Dict[str, Any]]:
                 continue
             chosen = c
             break
+
+        # ---- luật 2: dời số TRONG CÙNG entry -------------------------------
+        # Có bộ mà entry AniList ĐÃ là mùa đúng, chỉ có số tập bị đánh tiếp nối:
+        # "Seihantai na Kimi to Boku 2nd Season" (13 tập) giữ link số 24, trong khi
+        # mùa 1 (12 tập) đứng ngay trước nó ⇒ 24 - 12 = 12, hợp lệ.
+        if not chosen:
+            renum = _renumber(parent, anime, bad, used_nums)
+            if renum:
+                entry = {
+                    "from_id": aid, "from_slug": parent["slug"],
+                    "offset": renum["offset"], "links": renum["links"],
+                    "nums": nums, "mapped": renum["mapped"],
+                    "to_id": aid, "to_slug": parent["slug"],
+                    "to_total": parent["episodes_total"],
+                    "confidence": renum["confidence"], "renumber": True,
+                    "reason": f"dời số trong cùng entry (mùa trước có "
+                              f"{renum['offset']} tập)",
+                }
+                plans.append(entry)
+                continue
 
         entry: Dict[str, Any] = {
             "from_id": aid,
@@ -120,7 +196,13 @@ def report(plans: List[Dict]) -> str:
         return "  ✓ không có link nào vượt tổng số tập"
     lines = []
     for p in plans:
-        if p["to_id"]:
+        if p.get("renumber"):
+            lines.append(
+                f"  ↻ {p['from_slug']}: {len(p['links'])} link tập "
+                f"{p['nums'][0]}–{p['nums'][-1]} → dời số thành tập "
+                f"{p['mapped'][0]}–{p['mapped'][-1]} (cùng entry, mùa trước "
+                f"{p['offset']} tập / {p['to_total']} tập) [{p['confidence']}]")
+        elif p["to_id"]:
             lines.append(
                 f"  → {p['from_slug']}: {len(p['links'])} link tập "
                 f"{p['nums'][0]}–{p['nums'][-1]} → {p['to_slug']} "
