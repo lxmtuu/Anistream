@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { toAnimeDto, youtubeId } from "./.build/assemble.mjs";
+import { recentAired, toAnimeDto, youtubeId } from "./.build/assemble.mjs";
 
 const ROW = {
   id: 1, slug: "one-punch-man", title_romaji: "One Punch Man",
@@ -82,4 +82,22 @@ test("chỉ có bản AS thì dùng AS (không bỏ trống)", () => {
   const asia = { ...link(1), region: "AS", url: `https://www.youtube.com/watch?v=${"A".repeat(11)}` };
   const dto = toAnimeDto(ROW, [{ anime_id: 1, number: 1, title: "", airing_at: null }], [asia]);
   assert.equal(dto.episodes[0].video_id, "A".repeat(11));
+});
+
+test("recentAired: bỏ tập CHƯA chiếu (506 tập tương lai / 66 bộ, đo 02/11/2026)", () => {
+  const now = new Date("2026-11-02T12:00:00Z");
+  const rows = [
+    { anime_id: 1, number: 5, airing_at: "2026-11-02T09:00:00Z" },  // trong 6h → giữ
+    { anime_id: 1, number: 6, airing_at: "2026-11-02T11:30:00Z" },  // vừa chiếu → giữ
+    { anime_id: 2, number: 9, airing_at: "2026-11-09T12:00:00Z" },  // TUẦN SAU → bỏ
+    { anime_id: 3, number: 1, airing_at: "2026-10-20T12:00:00Z" },  // cũ → bỏ
+    { anime_id: 4, number: 3, airing_at: null },                    // không rõ lịch → giữ
+  ];
+  const kept = recentAired(rows, now).map((r) => `${r.anime_id}-${r.number}`);
+  assert.deepEqual(kept, ["1-5", "1-6", "4-3"]);
+});
+
+test("recentAired: airing_at hỏng không làm mất tập", () => {
+  const kept = recentAired([{ airing_at: "not-a-date" }], new Date("2026-11-02T12:00:00Z"));
+  assert.equal(kept.length, 1);
 });
