@@ -110,6 +110,18 @@ AniList ghi **năm của mùa** (`One Punch Man 2` → 2019) còn TMDB ghi **nă
 `match_anime` **bỏ lọc năm** (vẫn giữ ngưỡng tên 0.80), bộ không ghi mùa vẫn lọc
 năm như cũ.
 
+### Job D — hai lỗi làm job "chạy mà không ghi được gì" (02/11/2026)
+
+Đo trên một lần chạy `tmdb --limit-tmdb 200` (505 giây):
+
+| Hiện tượng | Nguyên nhân | Vá |
+|---|---|---|
+| 13 bộ báo `patch anime lỗi 409: duplicate key "anime_tmdb_id_key" (Key (tmdb_id)=…)` **và mất luôn danh sách tập** | `anime.tmdb_id` có ràng buộc **UNIQUE**, nhưng TMDB gộp cả series vào 1 id còn AniList tách mỗi mùa 1 entry ⇒ "One-Punch Man" và "One Punch Man 2" **buộc phải** cùng `tmdb_id` | bỏ UNIQUE (`db/migrations/20261102_tmdb_id_khong_duy_nhat.sql`), giữ index thường; lỗi ghi hồ sơ không còn chặn phần tập |
+| **56 bộ "không tìm được trên TMDB"** dù TMDB có | TMDB đặt tên series **gộp cả bộ** ("One-Punch Man"), tên AniList của mùa 2 có hậu tố ("One-Punch Man Season 2") ⇒ tìm nguyên chuỗi ra 0 kết quả | `tmdb.base_title()` bỏ hậu tố mùa và **thử lại** với tên gốc |
+
+`base_title` cắt: `… 2nd Season`, `… Season 2`, `… Mùa 2`, `… II`, `… 2` (số cuối).
+Không cắt gì thì trả `None` (không đoán: `Naruto` vẫn là `Naruto`).
+
 ### Job H — `reassign`: link bị gán sai mùa
 
 Muse đánh số tập **tiếp nối qua các mùa**: FAIRY TAIL đăng liên tục tập 1–277,

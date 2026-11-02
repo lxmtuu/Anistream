@@ -470,6 +470,34 @@ def episodes_plausible(
     return season_count <= int(episodes_total) + tolerance
 
 
+# Hậu tố chỉ mùa mà TMDB KHÔNG có trong tên series: "… Season 2", "… 2nd Season",
+# "… Mùa 2", "… 2", "… II". TMDB đặt tên series gộp cả bộ ("One-Punch Man"), nên
+# tìm nguyên chuỗi có hậu tố sẽ ra 0 kết quả (đo 02/11/2026: 56 bộ không tìm thấy).
+_SEASON_SUFFIX = (
+    re.compile(r"\s*[:\-–]?\s*\d+(?:st|nd|rd|th)\s*season\s*$", re.IGNORECASE),
+    re.compile(r"\s*[:\-–]?\s*season\s*\d+\s*$", re.IGNORECASE),
+    re.compile(r"\s*[:\-–]?\s*m[ùu]a\s*\d+\s*$", re.IGNORECASE),
+    re.compile(r"\s+(?:II|III|IV|V)$"),
+    re.compile(r"\s+\d{1,2}$"),
+)
+
+
+def base_title(title: Optional[str]) -> Optional[str]:
+    """Bỏ hậu tố mùa để tìm được series gộp trên TMDB.
+
+    `"One-Punch Man Season 2"` → `"One-Punch Man"`, `"Mob Psycho 100 II"` →
+    `"Mob Psycho 100"`. Trả None khi không cắt được gì (hoặc tên quá ngắn).
+    """
+    t = (title or "").strip()
+    if not t:
+        return None
+    for rx in _SEASON_SUFFIX:
+        cut = rx.sub("", t).strip(" :-–")
+        if cut and cut != t and len(cut) >= 3:
+            return cut
+    return None
+
+
 # ─────────────────────────────────────────── API mức cao (1 anime)
 def match_anime(row: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], float, str]:
     """Tìm phim trên TMDB cho 1 row `anime`. Trả (result|None, điểm, cách thử)."""
@@ -484,8 +512,19 @@ def match_anime(row: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], float, s
     hint = season_from_title(*titles)
     year_filter = None if (hint and hint > 1) else year
 
-    tried = []
+    # Thêm biến thể "tên gốc": tìm "One Punch Man 2" trên TMDB trả 0 kết quả, còn
+    # "One Punch Man" thì ra ngay series gộp cả 3 mùa → pick_season chọn mùa 2.
+    queries: list = []
     for t in titles:
+        if t not in queries:
+            queries.append(t)
+    for t in titles:
+        b = base_title(t)
+        if b and b not in queries:
+            queries.append(b)
+
+    tried = []
+    for t in queries:
         params: Dict[str, Any] = {"query": t}
         if year and year_filter is not None:
             params["first_air_date_year"] = year

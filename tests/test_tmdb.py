@@ -440,3 +440,49 @@ class TestEntryRiengCuaTungMua(unittest.TestCase):
     def test_khong_co_so_tap_thi_khong_doan(self):
         so, _ = tmdb.pick_season(self.D, None, None, season_hint=2)
         self.assertIsNone(so)
+
+
+class TestBaseTitle(unittest.TestCase):
+    """Tìm trên TMDB bằng TÊN GỐC khi tên có hậu tố mùa.
+
+    Đo 02/11/2026: `tmdb --limit-tmdb 200` báo **56 bộ không tìm được trên TMDB**
+    (`One-Punch Man Season 2`, `DAN DA DAN Season 2`, `Shangri-La Frontier Season
+    2`, …) vì TMDB đặt tên series GỘP cả bộ, không có "Season 2" trong tên.
+    """
+
+    def test_bo_hau_to_mua(self):
+        cases = {
+            "One-Punch Man Season 2": "One-Punch Man",
+            "Dandadan 2nd Season": "Dandadan",
+            "One Punch Man 2": "One Punch Man",
+            "Mob Psycho 100 II": "Mob Psycho 100",
+            "Bộ phim - Mùa 2": "Bộ phim",
+        }
+        for title, want in cases.items():
+            self.assertEqual(tmdb.base_title(title), want, title)
+
+    def test_khong_cat_bua_khi_khong_co_mua(self):
+        self.assertIsNone(tmdb.base_title("Naruto"))
+        self.assertIsNone(tmdb.base_title("FAIRY TAIL"))
+        self.assertIsNone(tmdb.base_title(None))
+
+    def test_match_anime_thu_lai_bang_ten_goc(self):
+        """Tên có "Season 2" trả 0 kết quả, tên gốc mới ra series gộp."""
+        from unittest.mock import patch
+        row = {"title_english": "One-Punch Man Season 2",
+               "title_romaji": "One Punch Man 2", "title_native": None,
+               "year": 2019}
+        results = [{"id": 63926, "name": "One-Punch Man",
+                    "original_name": "One-Punch Man",
+                    "first_air_date": "2015-09-20", "popularity": 80}]
+
+        def fake_get(path, params=None):
+            assert path == "/search/tv"
+            q = (params or {}).get("query", "")
+            return {"results": results if q == "One-Punch Man" else []}
+
+        with patch.object(tmdb, "_get", side_effect=fake_get), \
+                patch.object(tmdb.time, "sleep"):
+            best, score, how = tmdb.match_anime(row)
+        self.assertIsNotNone(best, how)
+        self.assertIn("One-Punch Man", how)
