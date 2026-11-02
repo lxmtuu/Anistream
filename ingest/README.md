@@ -84,7 +84,8 @@ series mà các mùa giống nhau (12–13 tập) và năm lệch, nó trả `No
 (`one-punch-man-2`, `mob-psycho-100-ii`, `dandadan-2nd-season`, `ao-no-hako`,
 `kusuriya-no-hitorigoto-2nd-season`, …).
 
-Nay `tmdb.season_from_title()` đọc `2nd Season` / `Season 2` / `Mùa 2` từ
+Nay `tmdb.season_from_title()` đọc `2nd Season` / `Second Season` (viết bằng chữ)
+/ `Season 2` / `Mùa 2` từ
 `title_romaji`/`title_english`/`title_native` và truyền xuống `pick_season` như
 lựa chọn **đáng tin nhất**. Hai chốt an toàn:
 

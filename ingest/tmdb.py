@@ -336,8 +336,17 @@ def _year_of(date_str: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+_ORDINALS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+    "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+}
 SEASON_IN_TITLE = (
     re.compile(r"(\d+)(?:st|nd|rd|th)\s*season", re.IGNORECASE),
+    # "Second Season" viết bằng chữ (Diamond no Ace act II: Second Season)
+    re.compile(
+        r"\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s*season",
+        re.IGNORECASE,
+    ),
     re.compile(r"season\s*(\d+)", re.IGNORECASE),
     re.compile(r"m[ùu]a\s*(\d+)", re.IGNORECASE),
 )
@@ -365,8 +374,9 @@ def season_from_title(*titles: Optional[str]) -> Optional[int]:
         for rx in SEASON_IN_TITLE:
             m = rx.search(t)
             if m:
-                n = int(m.group(1))
-                if 1 <= n <= 30:
+                g = m.group(1)
+                n = _ORDINALS.get(g.lower()) if g.isalpha() else int(g)
+                if n and 1 <= n <= 30:
                     return n
         # "… 2" / "… II" ở CUỐI tên. Chỉ nhận 2..9 (mùa 1 viết "… 1" gần như
         # không có) và bỏ qua số > 30 để "Mob Psycho 100" không thành mùa 100.

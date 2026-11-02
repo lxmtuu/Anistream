@@ -345,6 +345,10 @@ class TestSeasonFromTitle(unittest.TestCase):
             "Karakai Jouzu no Takagi-san 2": 2,
             "PetitCure: Precure Fairies Season 4": 4,
             "Bộ phim - Mùa 2": 2,
+            # HỒI QUY 02/11/2026: "Second Season" viết bằng CHỮ (Diamond no Ace
+            # act II: Second Season) trước đây không khớp regex nào → None.
+            "Diamond no Ace act II: Second Season": 2,
+            "Some Show Third Season": 3,
         }
         for title, want in cases.items():
             self.assertEqual(tmdb.season_from_title(title), want, title)
