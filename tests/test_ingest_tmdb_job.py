@@ -279,3 +279,48 @@ class TestJobTmdbRefresh(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGoiYMuaTuTen(unittest.TestCase):
+    """30 bộ đã chiếu xong mà 0 tập (đo 02/11/2026).
+
+    AniList tách mỗi mùa thành entry riêng; TMDB gộp cả series. `pick_season` cũ
+    chỉ dựa năm/số tập nên bó tay khi các mùa giống nhau → không lấy được tập.
+    Nay job D đọc số mùa từ TÊN bộ rồi truyền xuống `pick_season`.
+    """
+
+    def _run(self, row, detail, season_eps=24):
+        db = FakeDB([row])
+        with patch.object(tmdb, "is_configured", return_value=True), \
+                patch("ingest.tmdb.match_anime", return_value=MATCH), \
+                patch("ingest.tmdb.fetch_detail", return_value=detail), \
+                patch("ingest.tmdb.fetch_season",
+                      return_value={"episodes": [
+                          {"episode_number": n, "air_date": "2025-01-10",
+                           "name": None} for n in range(1, season_eps + 1)]}), \
+                redirect_stdout(io.StringIO()):
+            ingest_main.job_tmdb(db, limit=1)
+        eps = [r for t, rows in db.upserted if t == "episodes" for r in rows]
+        return db, eps
+
+    def test_mua_2_giong_mua_1_van_lay_duoc_tap(self):
+        row = dict(ROW, slug="kusuriya-no-hitorigoto-2nd-season",
+                   title_romaji="Kusuriya no Hitorigoto 2nd Season",
+                   title_english=None, year=2025, episodes_total=24)
+        detail = _detail(seasons=(1, 2), total=48, meta={
+            1: {"episode_count": 24, "air_date": "2023-10-01"},
+            2: {"episode_count": 24, "air_date": "2025-01-10"},
+        })
+        db, eps = self._run(row, detail)
+        self.assertEqual(len(eps), 24, "phải lấy được tập của mùa 2")
+        self.assertEqual(sorted(r["number"] for r in eps), list(range(1, 25)))
+
+    def test_ten_ghi_mua_5_ma_tmdb_chi_co_2_thi_khong_ghi_tap(self):
+        row = dict(ROW, slug="x-5th-season", title_romaji="X 5th Season",
+                   title_english=None, year=2030, episodes_total=12)
+        detail = _detail(seasons=(1, 2), total=24, meta={
+            1: {"episode_count": 12, "air_date": "2020-01-01"},
+            2: {"episode_count": 12, "air_date": "2021-01-01"},
+        })
+        db, eps = self._run(row, detail, season_eps=12)
+        self.assertEqual(eps, [], "không được gán tập mùa khác khi tên ghi mùa 5")

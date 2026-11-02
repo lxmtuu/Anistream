@@ -75,6 +75,23 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 
 `all` = A + B + C + C' + D + D' + E + F + G. (`reassign` chạy tay — xem dưới.)
 
+### Job D: đọc MÙA từ tên bộ (`season_from_title`)
+
+AniList tách mỗi mùa thành entry riêng ("Kusuriya no Hitorigoto 2nd Season"), TMDB
+gộp cả series vào một id. `pick_season` cũ chỉ dựa **năm** hoặc **số tập** — với
+series mà các mùa giống nhau (12–13 tập) và năm lệch, nó trả `None` → **không lấy
+được tập nào**. Đo 02/11/2026: **30 bộ FINISHED đã chiếu xong mà 0 tập**
+(`one-punch-man-2`, `mob-psycho-100-ii`, `dandadan-2nd-season`, `ao-no-hako`,
+`kusuriya-no-hitorigoto-2nd-season`, …).
+
+Nay `tmdb.season_from_title()` đọc `2nd Season` / `Season 2` / `Mùa 2` từ
+`title_romaji`/`title_english`/`title_native` và truyền xuống `pick_season` như
+lựa chọn **đáng tin nhất**. Hai chốt an toàn:
+
+- **không** đọc `Part 2` — đó là phần trong cùng một mùa TMDB, không phải mùa mới;
+- tên ghi mùa N mà TMDB **không** có mùa N → trả `None` (không rơi xuống đoán mò,
+  tránh gán tập mùa 1 cho entry mùa 2).
+
 ### Job H — `reassign`: link bị gán sai mùa
 
 Muse đánh số tập **tiếp nối qua các mùa**: FAIRY TAIL đăng liên tục tập 1–277,

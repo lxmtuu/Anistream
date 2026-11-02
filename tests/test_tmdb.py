@@ -329,3 +329,54 @@ class TestCleanEpisodeTitle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestSeasonFromTitle(unittest.TestCase):
+    """30 bộ đã chiếu xong mà 0 tập (đo 02/11/2026) vì pick_season bó tay trước
+    các mùa giống nhau (12–13 tập/mùa). Nay đọc số mùa ngay từ tên bộ."""
+
+    def test_doc_so_mua_tu_ten(self):
+        cases = {
+            "Kusuriya no Hitorigoto 2nd Season": 2,
+            "Ao no Hako Season 2": 2,
+            "Tensei Shitara Ken Deshita 2nd Season": 2,
+            "Kusuriya no Hitorigoto 3rd Season": 3,
+            "Karakai Jouzu no Takagi-san 2": None,
+            "PetitCure: Precure Fairies Season 4": 4,
+            "Bộ phim - Mùa 2": 2,
+        }
+        for title, want in cases.items():
+            self.assertEqual(tmdb.season_from_title(title), want, title)
+
+    def test_khong_doc_Part_2_vi_do_la_cour_trong_cung_mua(self):
+        self.assertIsNone(tmdb.season_from_title("Chitose-kun wa Ramune Bin no Naka Part 2"))
+        self.assertIsNone(tmdb.season_from_title("Mahou no Shimai LuluttoLilly Part 2"))
+
+    def test_ten_khong_co_mua(self):
+        self.assertIsNone(tmdb.season_from_title("FAIRY TAIL", "Fairy Tail"))
+        self.assertIsNone(tmdb.season_from_title(None, ""))
+
+    def test_thu_nhieu_ten_lay_cai_dau_tien_co(self):
+        self.assertEqual(
+            tmdb.season_from_title(None, "Some Anime 2nd Season", "Mùa 3"), 2)
+
+
+class TestPickSeasonTheoTen(unittest.TestCase):
+    def setUp(self):
+        self.D = {"seasons": [
+            {"season_number": 1, "episode_count": 24, "air_date": "2023-10-01"},
+            {"season_number": 2, "episode_count": 24, "air_date": "2025-01-10"},
+        ]}
+
+    def test_goi_y_mua_thang_duoc_so_tap_va_nam(self):
+        """Hai mùa đều 24 tập, năm lại lệch → trước đây trả None."""
+        self.assertEqual(tmdb.pick_season(self.D, 2025, 24)[0], 2)   # nhờ năm
+        self.assertEqual(tmdb.pick_season(self.D, None, 24)[0], None)  # mù mờ
+        so, why = tmdb.pick_season(self.D, None, 24, season_hint=2)
+        self.assertEqual(so, 2)
+        self.assertIn("theo tên", why)
+
+    def test_goi_y_khong_co_mua_do_thi_TRA_NONE(self):
+        """Tên ghi mùa 5 nhưng TMDB chỉ có 1–2 → không được đoán sang mùa khác."""
+        so, why = tmdb.pick_season(self.D, 2025, 24, season_hint=5)
+        self.assertIsNone(so)
+        self.assertIn("mùa 5", why)

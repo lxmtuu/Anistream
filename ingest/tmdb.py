@@ -336,14 +336,45 @@ def _year_of(date_str: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+SEASON_IN_TITLE = (
+    re.compile(r"(\d+)(?:st|nd|rd|th)\s*season", re.IGNORECASE),
+    re.compile(r"season\s*(\d+)", re.IGNORECASE),
+    re.compile(r"m[ùu]a\s*(\d+)", re.IGNORECASE),
+)
+
+
+def season_from_title(*titles: Optional[str]) -> Optional[int]:
+    """Đọc số mùa từ TÊN bộ: "… 2nd Season", "Season 2", "Mùa 2" → 2.
+
+    Vì sao cần: AniList tách mỗi mùa thành entry riêng ("Kusuriya no Hitorigoto
+    2nd Season"), còn TMDB gộp cả series vào một id. `pick_season` cũ chỉ dựa vào
+    năm/số tập nên với bộ nhiều mùa giống nhau (12–13 tập/mùa) nó bó tay → 30 bộ
+    đã chiếu xong mà KHÔNG có tập nào (đo 02/11/2026).
+
+    KHÔNG đọc "Part 2" — đó là phần trong cùng một mùa TMDB, không phải mùa mới.
+    """
+    for t in titles:
+        if not t:
+            continue
+        for rx in SEASON_IN_TITLE:
+            m = rx.search(t)
+            if m:
+                n = int(m.group(1))
+                if 1 <= n <= 30:
+                    return n
+    return None
+
+
 def pick_season(
     detail: Dict[str, Any],
     year: Optional[int] = None,
     episodes_total: Optional[int] = None,
+    season_hint: Optional[int] = None,
 ) -> Tuple[Optional[int], str]:
     """Chọn mùa TMDB ứng với 1 entry AniList. Trả (season_number | None, lý do).
 
     Thứ tự tin cậy:
+      0. `season_hint` (đọc từ tên bộ) trùng số mùa có thật → mùa đó (chắc nhất)
       1. TMDB chỉ có 1 mùa            → mùa đó (chắc chắn)
       2. đúng 1 mùa có NĂM = năm AniList → mùa đó (Takagi-san 2018 → S1, không phải S3)
       3. đúng 1 mùa có SỐ TẬP = số tập AniList → mùa đó
@@ -352,6 +383,16 @@ def pick_season(
     seasons = season_candidates(detail)
     if not seasons:
         return None, "TMDB không có mùa nào"
+
+    if season_hint:
+        hit = [s for s in seasons if s["number"] == season_hint]
+        if hit:
+            return hit[0]["number"], f"theo tên (mùa {season_hint})"
+        # Tên ghi mùa N nhưng TMDB không có mùa N → KHÔNG rơi xuống đoán mò,
+        # vì như vậy dễ gán tập mùa 1 cho entry mùa 2.
+        return None, f"tên ghi mùa {season_hint} nhưng TMDB chỉ có mùa " + \
+            ", ".join(str(s["number"]) for s in seasons)
+
     if len(seasons) == 1:
         return seasons[0]["number"], "mùa duy nhất"
 

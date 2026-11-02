@@ -411,8 +411,14 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
             # TMDB gộp cả series vào 1 id; AniList tách từng mùa. Phải chọn đúng mùa
             # thì danh sách tập mới đúng — trước đây bỏ qua MỌI bộ nhiều mùa nên
             # Takagi-san (3 mùa) không có tập nào dù đã có tmdb_id.
+            # Gợi ý mùa từ CHÍNH TÊN bộ: "… 2nd Season" → mùa 2. Không có bước
+            # này thì bộ nhiều mùa giống nhau (12–13 tập/mùa) bị bỏ trống danh
+            # sách tập dù TMDB có đủ (đo 02/11/2026: 30 bộ FINISHED 0 tập).
+            hint_season = tmdb.season_from_title(
+                row.get("title_romaji"), row.get("title_english"),
+                row.get("title_native"))
             season_no, why = tmdb.pick_season(
-                detail, row.get("year"), row.get("episodes_total"))
+                detail, row.get("year"), row.get("episodes_total"), hint_season)
             matched = season_no is not None
             if not matched and len(tmdb.real_seasons(detail)) > 1:
                 multi_season.append(f"{label}  ({why})")
