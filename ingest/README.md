@@ -186,6 +186,12 @@ Nay có luật thứ ba, dùng **ngày chiếu** thay vì số học:
    năm của entry AniList**, đánh số lại `1..N`; số tập phải ≈ `total` (lệch ≤ 2),
    nếu không trả rỗng (mùa vắt qua 2 năm 12+12 sẽ bị loại thay vì ghép bừa).
 
+Luật này cũng chạy như **fallback cuối** khi season đã chọn có số tập nhiều hơn hẳn
+`episodes_total` mà `first_season_cut` không áp dụng được (tên ghi mùa 2/3). Ca thật
+02/11/2026: `yozakura-san-chi-no-daisakusen-2nd-season` (12 tập, năm 2026),
+`tougen-anki-nikko-kegon-no-taki-hen` (12 tập, 2026), `petitcure-…-season-3` (27 tập,
+2026), `tensei-kizoku-…-2nd-season` (12 tập, 2024) — TMDB trả 24/24/37/12 tập.
+
 `explain` cũng đi qua luật này nên chẩn đoán và job luôn khớp nhau.
 
 ### Job D — không quét lại bộ vừa hỏi TMDB (02/11/2026)
