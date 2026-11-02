@@ -132,8 +132,8 @@ class TestLinkRowsDungMoTa(unittest.TestCase):
             return None, 0.3, "không khớp"
 
         with patch.object(match, "resolve_series", side_effect=fake_resolve):
-            rows, links, unmatched, _ = ingest_main._link_rows(db, [v], {},
-                                                               verbose=False)
+            rows, links, unmatched, _, _cs = ingest_main._link_rows(
+                db, [v], {}, verbose=False)
         self.assertEqual(unmatched, {})
         self.assertEqual(len(links), 1)
         self.assertIn("Nanatsu no Taizai: Imashime no Fukkatsu", da_goi)
@@ -146,10 +146,45 @@ class TestLinkRowsDungMoTa(unittest.TestCase):
         db = FakeDB()
         with patch.object(match, "resolve_series",
                           return_value=(media(888, "Bộ Lạ", 12), 1.0, "khớp")):
-            _, links, _, review = ingest_main._link_rows(db, [v], {}, verbose=False)
+            _, links, _, review, _cs = ingest_main._link_rows(db, [v], {}, verbose=False)
         self.assertEqual(links, [])
         self.assertEqual(len(review), 1)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNhoKetQuaAm(unittest.TestCase):
+    """Kết quả ÂM phải được nhớ — nếu không, job C bắn hàng chục nghìn request.
+
+    Đo 03/11/2026: 104 tên chưa khớp / **1647 video**. Mỗi tên tốn 1–5 request
+    AniList; không nhớ kết quả âm thì mỗi VIDEO lại hỏi lại ⇒ ~24.000 request,
+    AniList giới hạn ~90 req/phút ⇒ chạy hàng giờ, vẫn 0 link, và dễ bị chặn.
+    """
+
+    def test_lan_2_dung_cache_am_khong_search(self):
+        cache = {}
+        with patch.object(match, "search_candidates", return_value=[]):
+            m, _, why = match.resolve_series("Bộ Không Tồn Tại", cache=cache)
+        self.assertIsNone(m)
+        self.assertIn("không", why)
+        self.assertIsNone(cache[match.alias_key("Bộ Không Tồn Tại")])
+        with patch.object(match, "search_candidates",
+                          side_effect=AssertionError("không được search lại")):
+            m2, _, why2 = match.resolve_series("Bộ Không Tồn Tại", cache=cache)
+        self.assertIsNone(m2)
+        self.assertIn("cache", why2)
+
+    def test_nhieu_video_cung_ten_chi_search_mot_lan(self):
+        goi = []
+
+        def dem(name, per_page=10):
+            goi.append(name)
+            return []
+
+        with patch.object(match, "search_candidates", side_effect=dem):
+            cache = {}
+            for _ in range(50):
+                match.resolve_series("Gia Sư Hitman Reborn!", cache=cache)
+        self.assertEqual(len(goi), 1, "50 video cùng tên ⇒ chỉ 1 lần search")

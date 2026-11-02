@@ -252,14 +252,41 @@ def _ten_ung_vien(v: Dict) -> List[tuple]:
 
     add(v.get("series"))
     add(v.get("series_base"))
-    for t in youtube.tieu_de_phu(v.get("description") or ""):
+    for t in youtube.tieu_de_phu(v.get("description") or "", toi_da=3):
         add(t, True)
     return out
+
+
+def _ghi_review(need_review: Dict[str, int], can_soat: Dict[str, str],
+                series: str, episode: int, total: int,
+                anime_id: Optional[int] = None,
+                anilist_id: Optional[int] = None) -> None:
+    """Ghi nhận 1 video bị chặn vì vượt tổng số tập.
+
+    VÌ SAO đổi khoá (03/11/2026): khoá cũ là `'<series> (tập N > M tập)'` ⇒ **mỗi
+    TẬP một dòng**. Một bộ 24 tập mà DB ghi 12 tập sinh ra 12 dòng rác; đo trên
+    DB thật: 240 dòng `kind='review'` chỉ từ vài bộ (DAN DA DAN S2 tập 13…24).
+    Nay khoá là TÊN SERIES, `videos` là số video bị chặn.
+
+    Đồng thời ghi vào `can_soat` (anime_id → tên) để job D **soát lại** bộ đó:
+    `episodes_total` sai thì đây là dữ liệu của mình sai, không phải video sai —
+    nhưng job C không được tự sửa số tập (không có nguồn), nên nó **xoá mốc
+    `tmdb_checked_at`** để lần chạy job D kế tiếp lấy lại từ TMDB.
+    """
+    need_review[series] = need_review.get(series, 0) + 1
+    # Khoá `can_soat`: "id:<id>" khi đã biết hàng trong bảng anime, "anilist:<id>"
+    # khi chỉ mới biết media AniList (bộ chưa có trong DB). Job C lúc này CHƯA
+    # upsert bộ đó nên không có `anime_id`; vẫn phải nhắc được job D.
+    if anime_id:
+        can_soat[f"id:{anime_id}"] = series
+    elif anilist_id:
+        can_soat[f"anilist:{anilist_id}"] = series
 
 
 def _link_rows(DB, videos, cache, verbose=True):
     """Ghép tên → anime rồi tạo rows `streaming_links`. Trả (matched, links, unmatched)."""
     matched, unmatched, need_review = [], {}, {}
+    can_soat: Dict[str, str] = {}      # "id:<anime_id>" | "anilist:<id>" → series
     # Chỉ mục tên bộ có sẵn trong DB (gồm `title_vi`) — thử TRƯỚC khi gọi AniList.
     idx = _chi_muc_ten(DB)
     if idx and verbose:
@@ -278,8 +305,8 @@ def _link_rows(DB, videos, cache, verbose=True):
             # Chốt chặn "không link nào vượt tổng số tập" áp dụng CẢ đường này.
             total = media.get("episodes")
             if isinstance(total, int) and total > 0 and v["episode"] > total:
-                key = f'{v["series"]} (tập {v["episode"]} > {total} tập)'
-                need_review[key] = need_review.get(key, 0) + 1
+                _ghi_review(need_review, can_soat, v["series"], v["episode"],
+                            total, local["anime_id"])
                 continue
             matched.append((v, media, confidence, how, local["anime_id"]))
             continue
@@ -306,14 +333,14 @@ def _link_rows(DB, videos, cache, verbose=True):
         # danh sách tập của bộ kia. Thà bỏ và báo ra để biết còn hơn ghi bừa.
         total = media.get("episodes")
         if isinstance(total, int) and total > 0 and v["episode"] > total:
-            key = f'{v["series"]} (tập {v["episode"]} > {total} tập)'
-            need_review[key] = need_review.get(key, 0) + 1
+            _ghi_review(need_review, can_soat, v["series"], v["episode"], total,
+                        anilist_id=media.get("id"))
             continue
 
         matched.append((v, media, confidence, how, None))
 
     if not matched:
-        return [], [], unmatched, need_review
+        return [], [], unmatched, need_review, can_soat
 
     # upsert anime trước để có id (chỉ bộ mới đến từ AniList; bộ đã có trong DB
     # đã có `anime_id` nên không ghi lại hồ sơ)
@@ -340,7 +367,7 @@ def _link_rows(DB, videos, cache, verbose=True):
             # parse sai (vd bản gộp "Tập 01-24" từng bị gán thành tập 1).
             "source_title": (v.get("raw_title") or "")[:300] or None,
         })
-    return rows, links, unmatched, need_review
+    return rows, links, unmatched, need_review, can_soat
 
 
 def job_unmatched(DB, limit: int = 40) -> int:
@@ -472,7 +499,8 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
             continue
 
         try:
-            rows, links, unmatched, need_review = _link_rows(DB, videos, cache)
+            rows, links, unmatched, need_review, can_soat = _link_rows(
+                DB, videos, cache)
         except Exception as e:
             print(f"  ✗ lỗi khi ghép tên/ghi {ch['name']}: {type(e).__name__}: {e}")
             failures.append(f"{ch['name']}: {e}")
@@ -502,6 +530,21 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
         if use_cache:
             path = match.save_disk_cache(cache)
             print(f"  · đã lưu cache {len(cache)} tên → {path}")
+
+        # "Vượt tổng số tập" thường là DỮ LIỆU CỦA MÌNH SAI (AniList/TMDB ghi 12
+        # tập trong khi kênh đã đăng 24). Job C không được tự sửa số tập, nhưng
+        # phải báo cho job D soát lại: xoá mốc `tmdb_checked_at` của đúng bộ đó.
+        if can_soat and not DB.dry:
+            for khoa, ten in can_soat.items():
+                loai, _, gia_tri = khoa.partition(":")
+                cot = {"id": "id", "anilist": "anilist_id"}.get(loai, "id")
+                try:
+                    DB.patch("anime", {cot: int(gia_tri)}, {"tmdb_checked_at": None})
+                except Exception as e:      # noqa: BLE001 — chỉ là nhắc job D
+                    print(f"  ! không xoá được mốc TMDB cho bộ {ten} "
+                          f"({type(e).__name__}: {str(e)[:80]})")
+            print(f"  · {len(can_soat)} bộ có video VƯỢT tổng số tập → "
+                  f"đã xoá mốc TMDB, job D sẽ soát lại")
 
         # Ghi CHẨN ĐOÁN của riêng kênh này ngay (kênh sau lỗi không xoá mất).
         n_diag = _luu_chua_khop(DB, ch["key"], unmatched, need_review, run_at)

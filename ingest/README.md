@@ -893,6 +893,33 @@ Tên tiếng Trung không search được trên AniList → thêm vào `aliases.
 Đây là **phần biên tập tạo giá trị riêng** của app (không đối thủ nào có danh mục này bằng tiếng Việt).
 Mẹo tìm ID: `python3 -m ingest.main` chỉ log tên, tìm trên https://anilist.co rồi lấy số trong URL.
 
+## Ba lỗi tìm ra sau lần chạy đầu tiên của bảng `ingest_unmatched` (03/11/2026)
+
+### 1. Không nhớ kết quả ÂM → job chạy hàng giờ rồi vẫn 0 link
+
+Đo trên DB: **104 tên chưa khớp / 1647 video**. Mỗi tên tốn 1–5 request AniList
+(nguyên tên → rút gọn → giản thể). Cache cũ chỉ nhớ kết quả **dương**, nên mỗi
+VIDEO của cùng một tên lại search lại ⇒ ~24.000 request, AniList giới hạn ~90
+req/phút ⇒ job chạy hàng giờ, bị chặn, và kết quả vẫn là 0 link.
+
+Nay `resolve_series` nhớ **cả kết quả âm** (`cache[key] = None`) và đọc lại ngay
+⇒ 50 video cùng một tên chỉ search **một lần**. Cache âm tự bị xoá khi
+`aliases.json` thay đổi (`prune_cache_on_alias_change`).
+
+### 2. `review` nổ thành một dòng cho MỖI TẬP
+
+Khoá cũ `'<series> (tập N > M tập)'` ⇒ bộ 24 tập mà DB ghi 12 tập sinh ra 12 dòng
+rác. Đo thật: **240 dòng `kind='review'`** chỉ từ vài bộ (DAN DA DAN S2 tập 13…24).
+Nay khoá là **tên series**, `videos` là số video bị chặn.
+
+### 3. "Vượt tổng số tập" thường là DỮ LIỆU CỦA MÌNH SAI — phải nhắc job D
+
+DAN DA DAN S2 thật có 24 tập, DB ghi 12 ⇒ 12 tập thật bị chốt chặn "không link nào
+vượt tổng số tập" loại bỏ, **im lặng**. Job C không có nguồn để tự sửa số tập
+(không được bịa), nhưng nó BIẾT dữ liệu mình sai. Nay job C **xoá
+`tmdb_checked_at`** của đúng bộ đó ⇒ lần chạy job D kế tiếp tự lấy lại số tập từ
+TMDB. Nhắc theo `anime_id` nếu bộ đã có trong DB, theo `anilist_id` nếu chưa.
+
 ## Tiêu đề tiếng Việt + tên gốc trong MÔ TẢ + chọn đúng MÙA (03/11/2026)
 
 Sau khi bảng `ingest_unmatched` chạy thật, danh sách lộ ra bức tranh đầy đủ — **DB
