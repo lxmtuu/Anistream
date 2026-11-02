@@ -194,6 +194,34 @@ Luật này cũng chạy như **fallback cuối** khi season đã chọn có s�
 
 `explain` cũng đi qua luật này nên chẩn đoán và job luôn khớp nhau.
 
+### Job D — cắt tập theo KHOẢNG CHIẾU của AniList (02/11/2026)
+
+Lần chạy 15:46 vẫn bỏ 3 bộ. Truy ra hai sự thật **khác nhau**, và cả hai đều chỉ
+giải được bằng ngày chiếu của chính entry AniList:
+
+| bộ | TMDB | AniList |
+|---|---|---|
+| `yozakura-…-2nd-season` | 216467 **mùa 2 = 24 tập** (12/04/2026 →) | tách "2nd Season" 12 tập + **"2nd Season Part 2"** 12 tập |
+| `tensei-kizoku-…-3rd-season` | 237150 **một season 36 tập** (07/04/2024 →) | mùa 3 chiếu từ 10/2026 |
+
+Luật theo NĂM không tách được (cả hai cour đều 2026; còn tensei thì tập mùa 1+2
+nằm lẫn trong "mùa 3"). Vì vậy job **hỏi AniList `startDate`/`endDate`** của
+đúng entry đó (`anilist.airing_window`) rồi cắt
+(`tmdb.episode_rows_in_window`):
+
+* có `endDate` → lấy tập trong khoảng, số tập phải ≈ `episodes_total` (lệch ≤ 2);
+* chưa có `endDate` (đang chiếu) → lấy các tập **đầu tiên** kể từ `startDate`;
+* không có `startDate` → **trả rỗng**, không ghi gì.
+
+Thêm hai bảo vệ:
+
+* **Phát hiện dữ liệu cũ sai**: tập đã có mà bắt đầu ở năm khác năm của entry
+  (tensei-3rd: tập từ 2024 trong một bộ 2026) thì **vẫn xử lý lại**, không coi
+  là "đã có tập".
+* **Dọn tập sai**: sau khi ghi theo khoảng chiếu, xoá tập có ngày chiếu nằm
+  ngoài khoảng đó (chừa 90 ngày mỗi đầu để không xoá nhầm mùa đông chiếu từ
+  tháng 12 năm trước). `db.delete` nay nhận toán tử PostgREST (`lt.`/`gt.`).
+
 ### Job D — `seasons[].episode_count` của TMDB hay LỆCH (02/11/2026)
 
 Lần chạy 15:30 còn 3 bộ bị bỏ. Một trong số đó lộ ra lỗi này: detail TMDB báo
