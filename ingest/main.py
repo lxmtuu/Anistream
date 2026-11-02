@@ -528,9 +528,9 @@ def _tmdb_candidates(DB, limit: int, refresh: bool, only: list,
         # tập trùng ngày chiếu) ⇒ phải xử lý lại KỂ CẢ khi đã có tập.
         r["_can_sua"] = True
     if thieu:
-        print(f"  · {len(thieu)} anime có danh sách tập SAI (trống hoặc trùng "
-              f"ngày chiếu) · {len(fresh_thieu)} xếp lịch lần này "
-              f"(hỏi lại sau 1 ngày)")
+        print(f"  · {len(thieu)} anime có danh sách tập cần sửa (trống · trùng "
+              f"ngày chiếu · FINISHED mà thiếu tập) · {len(fresh_thieu)} xếp "
+              f"lịch lần này (hỏi lại sau 1 ngày)")
     rows += fresh_thieu
     rows = rows[:int(limit)]
     print(f"  · {len(rows)} anime sẽ xử lý lần này")

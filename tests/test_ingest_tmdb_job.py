@@ -379,7 +379,7 @@ class TestJobTmdb(unittest.TestCase):
              "airing_at": "2026-09-27T00:00:00+00:00"}]}
         _, out = self._run(db, seasons=(1,), total=36, meta=meta, eps=eps,
                            window={"from": start, "to": None})
-        self.assertIn("danh sách tập SAI", out)
+        self.assertIn("danh sách tập cần sửa", out)
         self.assertIn("dọn 1 tập trùng", out)
         removed = [f.get("id") for t, f in db.deleted if t == "episodes"]
         self.assertIn(501, removed)
@@ -420,7 +420,7 @@ class TestJobTmdb(unittest.TestCase):
         db.thieu_tap = [dict(ROW, id=77, slug="thieu-tap",
                              tmdb_checked_at=None)]
         n, out = self._run(db, window={})
-        self.assertIn("danh sách tập SAI", out)
+        self.assertIn("danh sách tập cần sửa", out)
         touched = ([f.get("id") for _, f, _ in self._real_patches(db)]
                    + [r.get("anime_id") for t, rows in db.upserted if t == "episodes"
                       for r in rows])

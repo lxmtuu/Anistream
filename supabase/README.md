@@ -68,6 +68,8 @@ supabase login
 supabase link --project-ref <project-ref>
 
 # deploy cả 5 (project thật đã deploy rồi — chỉ chạy lại khi sửa code)
+bash scripts/deploy_edge.sh          # tự dùng `npx supabase@latest` nếu chưa cài
+# hoặc thủ công:
 supabase functions deploy home search schedule anime push
 # push cần tắt kiểm JWT (cron không có JWT người dùng) — đã set trong config.toml
 # hoặc: supabase functions deploy push --no-verify-jwt

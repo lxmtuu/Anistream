@@ -126,6 +126,25 @@ python3 -m ingest.main tmdb --force --limit-tmdb 200
 (`--force` bỏ hạn `tmdb_checked_at`; trước đây cả 163 bộ đều "vừa hỏi" nên bản
 vá này sẽ không có tác dụng cho tới khi hết hạn.)
 
+### View `anime_thieu_tap` — thêm nhóm "đã chiếu xong mà THIẾU TẬP"
+
+Job D chỉ chọn bộ theo (a) thiếu `title_vi/synopsis_vi/episodes_total`, (b)
+`status = RELEASING` khi `--refresh`, (c) nằm trong view này. Bộ **đã chiếu
+xong** mà có 1–66/25–175 tập không thuộc nhóm nào ⇒ **không bao giờ được lấp**.
+
+Đo 02/11/2026: **15 bộ thiếu 339 tập** — `fairy-tail` 66/175, `beelzebub` 1/60,
+`shangri-la-frontier` 4/25, `ragna-crimson` 1/24, `dark-gathering` 3/25…
+Trang chi tiết ghi "25 tập" mà danh sách chỉ có 4 dòng.
+
+Migration `db/migrations/20261102_view_thieu_tap_them_thieu_tap.sql` thêm điều
+kiện (3): `status = 'FINISHED' AND count(tập) < episodes_total`. Chỉ FINISHED —
+bộ đang chiếu thiếu tập là bình thường (Job D' lo), `NOT_YET_RELEASED` thì trống
+là đúng.
+
+View: **19 → 34 bộ** (19 trống + 15 thiếu tập). Job D đọc view này nên 15 bộ sẽ
+được thử lấp trong vòng 1 ngày tới (`tmdb_checked_at` giãn cách 1 ngày), hoặc
+ngay lập tức với `python3 -m ingest.main tmdb --force --limit-tmdb 200`.
+
 ### View `anime_thieu_tap` — bỏ tập trùng ngày HỢP LỆ khỏi hàng đợi sửa
 
 Định nghĩa cũ coi "2 tập cùng NGÀY chiếu" là danh sách tập sai ⇒ 4 bộ bị job TMDB
@@ -600,7 +619,7 @@ Kèm 2 lỗi nữa cùng đợt:
 ⚠️ Sau khi `git pull`, phải deploy lại edge function thì thay đổi mới có hiệu lực:
 
 ```bash
-supabase functions deploy home search schedule anime push
+bash scripts/deploy_edge.sh     # hoặc: supabase functions deploy home search schedule anime push
 ```
 
 ### PGRST102 "All object keys must match" (lỗi thật 02/11/2026)
