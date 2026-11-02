@@ -421,8 +421,19 @@ def pick_season(
         hit = [s for s in seasons if s["number"] == season_hint]
         if hit:
             return hit[0]["number"], f"theo tên (mùa {season_hint})"
-        # Tên ghi mùa N nhưng TMDB không có mùa N → KHÔNG rơi xuống đoán mò,
-        # vì như vậy dễ gán tập mùa 1 cho entry mùa 2.
+        # TMDB CÓ entry riêng cho từng mùa (vd "The Apothecary Diaries Season 2",
+        # id 220542) → entry đó chỉ có 1 "mùa" số 1, dù tên AniList ghi mùa 2.
+        # Chỉ nhận khi số tập của mùa duy nhất đó XẤP XỈ số tập AniList (lệch ≤2),
+        # nếu không thì vẫn từ chối — tránh gán tập mùa 1 cho entry mùa 2.
+        if len(seasons) == 1 and episodes_total:
+            only = seasons[0]
+            cnt = only["count"]
+            if isinstance(cnt, int) and abs(cnt - int(episodes_total)) <= 2:
+                return only["number"], (
+                    f"tên ghi mùa {season_hint} nhưng TMDB là entry riêng của mùa "
+                    f"({cnt} tập ≈ {episodes_total}) → dùng mùa {only['number']}"
+                )
+        # Còn lại: KHÔNG rơi xuống đoán mò, vì dễ gán tập mùa 1 cho entry mùa 2.
         return None, f"tên ghi mùa {season_hint} nhưng TMDB chỉ có mùa " + \
             ", ".join(str(s["number"]) for s in seasons)
 

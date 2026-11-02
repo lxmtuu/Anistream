@@ -91,7 +91,10 @@ lựa chọn **đáng tin nhất**. Hai chốt an toàn:
 
 - **không** đọc `Part 2` — đó là phần trong cùng một mùa TMDB, không phải mùa mới;
 - tên ghi mùa N mà TMDB **không** có mùa N → trả `None` (không rơi xuống đoán mò,
-  tránh gán tập mùa 1 cho entry mùa 2);
+  tránh gán tập mùa 1 cho entry mùa 2) — **trừ** trường hợp TMDB có entry **riêng
+  cho từng mùa** (vd id 220542 = "Apothecary Diaries Season 2" chỉ có Season 1):
+  khi đó mùa duy nhất được nhận nếu số tập của nó lệch ≤ 2 so với AniList. Đo
+  02/11/2026: 5 bộ FINISHED đã có `tmdb_id` mà vẫn 0 tập vì thiếu luật này;
 - tên có `":"` thì **bỏ qua** phần số ở cuối — `Girls und Panzer: Saishuushou 5` là
   phim lẻ phần 5, không phải mùa 5.
 

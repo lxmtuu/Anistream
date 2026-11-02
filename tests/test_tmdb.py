@@ -415,3 +415,28 @@ class TestMuaTuTenDangNgan(unittest.TestCase):
     def test_van_doc_dung_dang_day_du(self):
         self.assertEqual(tmdb.season_from_title("Dandadan 2nd Season"), 2)
         self.assertEqual(tmdb.season_from_title("Kusuriya no Hitorigoto 3rd Season"), 3)
+
+
+class TestEntryRiengCuaTungMua(unittest.TestCase):
+    """TMDB có entry RIÊNG cho mỗi mùa (id 220542 = "Apothecary Diaries Season 2").
+
+    Đo 02/11/2026: 5 bộ FINISHED đã có `tmdb_id` nhưng vẫn 0 tập — vì
+    `season_from_title` đòi mùa 2, còn entry đó chỉ có Season 1 (24 tập), nên
+    `pick_season` từ chối. Thực tế phải dùng chính Season 1 của entry đó.
+    """
+
+    D = {"seasons": [{"season_number": 1, "episode_count": 24,
+                      "air_date": "2025-01-10"}]}
+
+    def test_nhan_khi_so_tap_khop(self):
+        so, why = tmdb.pick_season(self.D, 2025, 24, season_hint=2)
+        self.assertEqual(so, 1, why)
+
+    def test_van_tu_choi_khi_so_tap_lech_xa(self):
+        """Entry 24 tập không thể là entry 12 tập của mùa khác."""
+        so, why = tmdb.pick_season(self.D, 2025, 12, season_hint=2)
+        self.assertIsNone(so, why)
+
+    def test_khong_co_so_tap_thi_khong_doan(self):
+        so, _ = tmdb.pick_season(self.D, None, None, season_hint=2)
+        self.assertIsNone(so)
