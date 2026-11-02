@@ -443,30 +443,31 @@ def _prune_duplicate_numbers(DB, row: dict, eps_written_rows: list) -> int:
     return removed
 
 
-def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
-             refresh: bool = False):
-    """Bổ sung tiếng Việt (title_vi, synopsis_vi) + danh sách tập từ TMDB.
+def _tmdb_candidates(DB, limit: int, refresh: bool, only: list) -> list:
+    """Chọn anime cho job TMDB.
 
-    Hai chế độ:
+    `only` khác rỗng ⇒ **chỉ** đúng những slug đó, bỏ qua mọi bộ lọc "đã hỏi gần
+    đây": người chạy đang sửa một bộ cụ thể và không muốn chờ 1–7 ngày.
 
-    · mặc định (`refresh=False`) — **bổ sung** bộ còn thiếu dữ liệu. Điều kiện cũ
-      `or=(title_vi.is.null, …)` khiến bộ nào đã đủ 3 trường thì KHÔNG BAO GIỜ được
-      ghé lại, và danh sách tập chỉ lấy khi bảng trống → tập mới của bộ đang chiếu
-      không bao giờ vào. Đó là lý do "cập nhật thường xuyên" không hoạt động.
-    · `refresh=True` — **làm mới** mọi bộ đang chiếu (`status = RELEASING`): upsert
-      các tập MỚI của mùa đang phát (không chỉ khi bảng trống).
+    Ưu tiên bộ phổ biến (người dùng thấy trước).
+    Bỏ qua bộ VỪA hỏi TMDB gần đây: bộ mà TMDB không có hoặc không có bản dịch vi
+    luôn thoả điều kiện `title_vi.is.null` nên trước đây bị quét lại ở MỌI lần
+    chạy (đo 02/11/2026: 792 giây cho 0 bản ghi). RELEASING hỏi lại sau 1 ngày
+    (cần bắt tập mới), còn lại 7 ngày.
     """
-    mode = "làm mới bộ đang chiếu" if refresh else "bổ sung bộ còn thiếu"
-    print(f"\n▶ Job D — TMDB: tên + tóm tắt tiếng Việt, danh sách tập  [{mode}]")
-    if not tmdb.is_configured():
-        raise RuntimeError(
-            "Thiếu TMDB_API_KEY → không bổ sung được tiếng Việt.\n"
-            "  Lấy key miễn phí: https://www.themoviedb.org/settings/api\n"
-            "  Thêm vào .env:  TMDB_API_KEY=xxxxxxxx"
-        )
+    if only:
+        cond = ",".join(only)
+        rows = DB.select("anime", f"select={TMDB_COLS}&slug=in.({cond})")
+        have = {r.get("slug") for r in rows}
+        missing = [s for s in only if s not in have]
+        if missing:
+            raise RuntimeError(
+                "Không có trong bảng anime: " + ", ".join(missing)
+                + "\n  → thêm bộ trước bằng: python3 -m ingest.main add --anilist <id>")
+        print(f"  · chỉ định {len(only)} slug → {len(rows)} anime "
+              f"(bỏ qua lọc 'đã hỏi gần đây')")
+        return rows
 
-    # Ưu tiên bộ phổ biến (người dùng thấy trước).
-    #
     # Bỏ qua bộ VỪA hỏi TMDB gần đây: bộ mà TMDB không có (44 bộ) hoặc không có
     # bản dịch vi (13 bộ) luôn thoả điều kiện `title_vi.is.null` nên trước đây bị
     # quét lại ở MỌI lần chạy. Đo 02/11/2026: 792 giây cho 0 bản ghi.
@@ -527,6 +528,38 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
     rows += fresh_thieu
     rows = rows[:int(limit)]
     print(f"  · {len(rows)} anime sẽ xử lý lần này")
+    return rows
+
+
+def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
+             refresh: bool = False, only_slug: str = ""):
+    """Bổ sung tiếng Việt (title_vi, synopsis_vi) + danh sách tập từ TMDB.
+
+    Hai chế độ:
+
+    · mặc định (`refresh=False`) — **bổ sung** bộ còn thiếu dữ liệu. Điều kiện cũ
+      `or=(title_vi.is.null, …)` khiến bộ nào đã đủ 3 trường thì KHÔNG BAO GIỜ được
+      ghé lại, và danh sách tập chỉ lấy khi bảng trống → tập mới của bộ đang chiếu
+      không bao giờ vào. Đó là lý do "cập nhật thường xuyên" không hoạt động.
+    · `refresh=True` — **làm mới** mọi bộ đang chiếu (`status = RELEASING`): upsert
+      các tập MỚI của mùa đang phát (không chỉ khi bảng trống).
+    · `only_slug` — chỉ đúng (các) slug này, bỏ qua lọc "đã hỏi gần đây".
+    """
+    only = [x.strip() for x in str(only_slug or "").split(",") if x.strip()]
+    mode = "làm mới bộ đang chiếu" if refresh else "bổ sung bộ còn thiếu"
+    if only:
+        mode += f" · chỉ {len(only)} slug"
+    print(f"\n▶ Job D — TMDB: tên + tóm tắt tiếng Việt, danh sách tập  [{mode}]")
+    if not tmdb.is_configured():
+        raise RuntimeError(
+            "Thiếu TMDB_API_KEY → không bổ sung được tiếng Việt.\n"
+            "  Lấy key miễn phí: https://www.themoviedb.org/settings/api\n"
+            "  Thêm vào .env:  TMDB_API_KEY=xxxxxxxx"
+        )
+
+    rows = _tmdb_candidates(DB, limit, refresh, only)
+
+
 
     patched = eps_written = new_episodes = 0
     no_match, no_vi, multi_season, implausible = [], [], [], []
@@ -1121,6 +1154,9 @@ def main(argv=None):
                     help="lấy TOÀN BỘ lịch sử kênh (cần YOUTUBE_API_KEY)")
     ap.add_argument("--limit-tmdb", type=int, default=60,
                     help="số anime làm giàu mỗi lần chạy job TMDB")
+    ap.add_argument("--only-slug", default="",
+                    help="job tmdb: chỉ xử lý (các) slug này, cách nhau bằng dấu "
+                         "phẩy — bỏ qua lọc 'đã hỏi gần đây'")
     ap.add_argument("--refresh", action="store_true",
                     help="job tmdb: LÀM MỚI bộ đang chiếu (bắt tập mới), "
                          "không chỉ bộ còn thiếu dữ liệu")
@@ -1169,7 +1205,8 @@ def main(argv=None):
                                  use_cache=not args.no_cache,
                                  only_channel=args.channel)
         if args.command == "tmdb":
-            total += job_tmdb(DB, args.limit_tmdb, refresh=args.refresh)
+            total += job_tmdb(DB, args.limit_tmdb, refresh=args.refresh,
+                              only_slug=args.only_slug)
         if args.command == "seasons":
             total += job_seasons(DB, args.limit_seasons)
         if args.command == "jikan":
