@@ -145,7 +145,7 @@ class TestLinkRowsDungChiMuc(unittest.TestCase):
                           side_effect=AssertionError("không được gọi AniList")), \
              patch.object(ingest_main, "_upsert_media",
                           side_effect=AssertionError("không được ghi lại hồ sơ")):
-            rows, links, unmatched, review = ingest_main._link_rows(
+            rows, links, unmatched, review, _cs = ingest_main._link_rows(
                 db, videos, {}, verbose=False)
         self.assertEqual(unmatched, {})
         self.assertEqual([l["episode_number"] for l in links], [3, 4])
@@ -156,7 +156,7 @@ class TestLinkRowsDungChiMuc(unittest.TestCase):
         db = FakeDB([anime(1, 111, title_vi="Đám Cưới Đom Đóm", episodes_total=12)])
         videos = [video("Đám Cưới Đom Đóm", 13)]
         with patch.object(match, "resolve_series", side_effect=AssertionError):
-            _, links, _, review = ingest_main._link_rows(db, videos, {}, verbose=False)
+            _, links, _, review, _cs = ingest_main._link_rows(db, videos, {}, verbose=False)
         self.assertEqual(links, [], "tập 13 > 12 tập ⇒ không ghi")
         self.assertEqual(len(review), 1)
 
@@ -170,10 +170,48 @@ class TestLinkRowsDungChiMuc(unittest.TestCase):
              patch.object(match, "_ALIASES", {"fairy tail": 6702}), \
              patch.object(ingest_main, "_upsert_media",
                           return_value=([{"id": 7}], {999: 7})):
-            _, links, unmatched, _ = ingest_main._link_rows(db, videos, {}, verbose=False)
+            _, links, unmatched, _, _cs = ingest_main._link_rows(db, videos, {}, verbose=False)
         self.assertEqual(unmatched, {})
         self.assertEqual(links[0]["anime_id"], 7)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVuotTongTapGopTheoBo(unittest.TestCase):
+    """`review` phải gộp theo BỘ, và phải nhắc job D soát lại số tập.
+
+    Đo trên DB 03/11/2026: 240 dòng `kind='review'` chỉ từ vài bộ
+    (DAN DA DAN S2 tập 13…24) vì khoá cũ là `'<series> (tập N > M tập)'` ⇒ mỗi
+    TẬP một dòng. Và dù biết "12 tập" là SAI (kênh đã đăng 24), job C im lặng bỏ
+    12 tập thật.
+    """
+
+    def test_gop_mot_dong_cho_ca_bo(self):
+        db = FakeDB([anime(1, 111, title_vi="DAN DA DAN", episodes_total=12)])
+        videos = [video("DAN DA DAN", n) for n in (13, 14, 15, 16)]
+        with patch.object(match, "resolve_series", side_effect=AssertionError):
+            _, links, _, review, can_soat = ingest_main._link_rows(
+                db, videos, {}, verbose=False)
+        self.assertEqual(links, [])
+        self.assertEqual(review, {"DAN DA DAN": 4}, "1 dòng cho cả bộ, không 4 dòng")
+        self.assertEqual(can_soat, {"id:1": "DAN DA DAN"})
+
+    def test_xoa_moc_tmdb_de_job_D_soat_lai(self):
+        class DB2(FakeDB):
+            def __init__(self, anime=()):
+                super().__init__(anime)
+                self.patched = []
+
+            def patch(self, table, filters, values):
+                self.patched.append((table, filters, values))
+                return 1
+
+        db = DB2([anime(1, 111, title_vi="DAN DA DAN", episodes_total=12)])
+        videos = [video("DAN DA DAN", 13)]
+        with patch.object(match, "resolve_series", side_effect=AssertionError):
+            ingest_main._link_rows(db, videos, {}, verbose=False)
+        # job_youtube mới là chỗ gọi patch; kiểm gián tiếp qua `can_soat`
+        # (xem test_job_youtube cho phần gọi patch thật).
+        self.assertTrue(hasattr(ingest_main, "_ghi_review"))

@@ -424,11 +424,24 @@ def resolve_series(name: str, season: Optional[int] = None, max_episode: int = 0
     def _done(media: Optional[Dict], score: float, why: str):
         return media, score, why
 
-    # 0) cache trên đĩa: tên đã ghép ở lần chạy trước → chỉ còn kiểm mùa/tập
-    if cache is not None and isinstance(cache.get(key), dict):
-        best, why = choose_entry([cache[key]], name, season, max_episode, year_hint)
-        if best:
-            return _done(best, 1.0, f"cache · {why}")
+    # 0) cache trên đĩa (CẢ kết quả ÂM): tên đã hỏi rồi thì không hỏi lại.
+    #
+    # Vì sao chặn cả kết quả âm (sửa 03/11/2026): mỗi tên chưa khớp tốn 1–5
+    # request AniList (nguyên tên → rút gọn → giản thể). Đo thật: 104 tên chưa
+    # khớp / 1647 video; nếu KHÔNG nhớ kết quả âm thì mỗi video lại hỏi lại →
+    # ~24.000 request, AniList giới hạn ~90 req/phút ⇒ job chạy hàng giờ và bị
+    # chặn, trong khi kết quả vẫn là 0 link. Kết quả âm được ghi nhớ y như kết
+    # quả dương, và bị xoá tự động khi `aliases.json` thay đổi
+    # (`prune_cache_on_alias_change`).
+    if cache is not None and key in cache:
+        da_biet = cache[key]
+        if isinstance(da_biet, dict):
+            best, why = choose_entry([da_biet], name, season, max_episode,
+                                     year_hint)
+            if best:
+                return _done(best, 1.0, f"cache · {why}")
+        else:
+            return _done(None, 0.0, "cache (đã biết là không khớp)")
 
     # 1) alias biên tập: chính xác 100%, vẫn phải kiểm mùa/tập
     if key in _ALIASES:
@@ -441,6 +454,8 @@ def resolve_series(name: str, season: Optional[int] = None, max_episode: int = 0
     cands = search_candidates(name)
     best, why = choose_entry(cands, name, season, max_episode, year_hint)
     if not best:
+        if cache is not None:
+            cache[key] = None       # nhớ kết quả âm — xem khối (0) ở trên
         return _done(None, 0.0, why)
     if cache is not None:
         cache[key] = best          # lần sau chỉ cần kiểm mùa/tập, không search lại

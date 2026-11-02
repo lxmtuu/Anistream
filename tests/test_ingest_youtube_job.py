@@ -237,3 +237,37 @@ class TestCollectChannel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVuotTongTapNhacJobD(unittest.TestCase):
+    """Job C gặp video vượt `episodes_total` → xoá `tmdb_checked_at`, để job D soát.
+
+    Vì sao: DAN DA DAN S2 thật có 24 tập nhưng DB ghi 12 ⇒ 12 tập thật bị chặn.
+    Job C không có nguồn để sửa số tập, nhưng nó BIẾT dữ liệu mình sai — im lặng
+    bỏ qua là kiểu lỗi tệ nhất.
+    """
+
+    def test_patch_xoa_moc_tmdb(self):
+        class DB(FakeDB):
+            def __init__(self):
+                super().__init__()
+                self.patched = []
+
+            def patch(self, table, filters, values):
+                self.patched.append((table, filters, values))
+                return 1
+
+        db = DB()
+        v = video("DAN DA DAN", 13)
+        with patch.object(youtube, "collect_channel", return_value=[v]), \
+             patch.object(match, "resolve_series",
+                          return_value=(dict(MEDIA, episodes=12), 1.0, "khớp")), \
+             patch.object(ingest_main, "_upsert_media",
+                          side_effect=lambda DB, medias: ([], {})), \
+             redirect_stdout(io.StringIO()):
+            ingest_main.job_youtube(db)
+        moc = [p for p in db.patched if "tmdb_checked_at" in p[2]]
+        self.assertTrue(moc, "phải xoá mốc TMDB của bộ có video vượt tổng tập")
+        self.assertIsNone(moc[0][2]["tmdb_checked_at"])
+        # bộ chưa có trong DB → nhắc theo anilist_id, không phải id
+        self.assertEqual(moc[0][1], {"anilist_id": MEDIA["id"]})
