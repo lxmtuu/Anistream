@@ -511,9 +511,13 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                    and tmdb.is_stale(r.get("tmdb_checked_at"),
                                      tmdb.stale_cutoff(
                                          tmdb.STALE_DAYS_RELEASING))]
+    for r in fresh_thieu:
+        # Đánh dấu: bộ này nằm trong view vì danh sách tập SAI (trống, hoặc có
+        # tập trùng ngày chiếu) ⇒ phải xử lý lại KỂ CẢ khi đã có tập.
+        r["_can_sua"] = True
     if thieu:
-        print(f"  · {len(fresh_thieu)}/{len(thieu)} anime có tổng tập nhưng "
-              f"0 tập → thử lại (hỏi TMDB lại sau 1 ngày)")
+        print(f"  · {len(fresh_thieu)}/{len(thieu)} anime có danh sách tập SAI "
+              f"(trống hoặc trùng ngày) → thử lại (hỏi TMDB lại sau 1 ngày)")
     rows += fresh_thieu
     rows = rows[:int(limit)]
     print(f"  · {len(rows)} anime sẽ xử lý lần này")
@@ -636,7 +640,7 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                 wrong_start = (
                     first_have.isdigit() and isinstance(row.get("year"), int)
                     and int(first_have) != int(row["year"]))
-                if refresh or not have or wrong_start:
+                if refresh or not have or wrong_start or row.get("_can_sua"):
                     season = tmdb.fetch_season(best["id"], season_no)
                     n_season = len([e for e in (season.get("episodes") or [])
                                     if isinstance(e.get("episode_number"), int)])

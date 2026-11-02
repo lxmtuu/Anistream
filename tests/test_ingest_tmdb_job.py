@@ -358,6 +358,31 @@ class TestJobTmdb(unittest.TestCase):
         self.assertIn(25, removed)
         self.assertNotIn(36, removed, "tập tương lai khác ngày chiếu phải giữ")
 
+    def test_view_bao_tap_trung_thi_xu_ly_lai_du_da_co_tap(self):
+        """Ca thật 02/11/2026: `tensei-kizoku-…-3rd-season` có 12 tập đúng +
+        12 dòng trùng (số 25..36). Trước đây job thấy "đã có tập" nên bỏ qua
+        vĩnh viễn, view cũng không bắt vì bộ này KHÔNG 0 tập.
+        """
+        import datetime as dt
+        row = dict(ROW, episodes_total=36, year=2026,
+                   title_english="As a Reincarnated Aristocrat… Season 3")
+        start = dt.date(2026, 9, 27)
+        eps = [{"episode_number": i + 1, "name": None,
+                "air_date": (start + dt.timedelta(days=7 * i)).isoformat()}
+               for i in range(12)]
+        meta = {1: {"episode_count": 36, "air_date": "2026-09-27"}}
+        db = FakeDB([], existing_episodes={5: [
+            {"number": 1, "airing_at": "2026-09-27T00:00:00+00:00"}]})
+        db.thieu_tap = [dict(row, tmdb_checked_at=None)]   # view báo "sai"
+        db.select_extra = {"episodes": [
+            {"number": 25, "airing_at": "2026-09-27T00:00:00+00:00"}]}
+        _, out = self._run(db, seasons=(1,), total=36, meta=meta, eps=eps,
+                           window={"from": start, "to": None})
+        self.assertIn("danh sách tập SAI", out)
+        self.assertIn("dọn 1 tập trùng", out)
+        removed = [f.get("number") for t, f in db.deleted if t == "episodes"]
+        self.assertIn(25, removed)
+
     def test_khong_co_ngay_chieu_anilist_thi_bao_ro(self):
         """Không đọc được ngày chiếu → KHÔNG ghi, và nói rõ vì sao (không im)."""
         import datetime as dt
@@ -394,7 +419,7 @@ class TestJobTmdb(unittest.TestCase):
         db.thieu_tap = [dict(ROW, id=77, slug="thieu-tap",
                              tmdb_checked_at=None)]
         n, out = self._run(db, window={})
-        self.assertIn("0 tập → thử lại", out)
+        self.assertIn("danh sách tập SAI", out)
         touched = ([f.get("id") for _, f, _ in self._real_patches(db)]
                    + [r.get("anime_id") for t, rows in db.upserted if t == "episodes"
                       for r in rows])

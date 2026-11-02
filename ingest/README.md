@@ -194,6 +194,20 @@ Luật này cũng chạy như **fallback cuối** khi season đã chọn có s�
 
 `explain` cũng đi qua luật này nên chẩn đoán và job luôn khớp nhau.
 
+### Job D — "đã có tập" không có nghĩa là tập ĐÚNG (02/11/2026)
+
+Lần chạy 17:34 xử lý `tensei-…-3rd-season` nhưng không ghi gì: bộ còn 24 dòng,
+dòng đầu là 2026 (trùng năm của entry) ⇒ `wrong_start` sai, và `have` khác rỗng
+⇒ bỏ qua. Bản vá xoá-trùng ở PR #27 vì thế **không có cơ hội chạy**.
+
+Nay view `anime_thieu_tap` định nghĩa lại "danh sách tập SAI":
+`không có tập nào` **hoặc** `có 2 tập trùng NGÀY CHIẾU`. Bộ nào trong view được
+gắn cờ khi đưa vào hàng đợi và **luôn được xử lý lại**, kể cả khi đã có tập.
+
+Lưu ý: trùng ngày chiếu *có thể* là double-episode thật (đo 02/11/2026:
+`tensei-goblin-dakedo-shitsumon-aru` tập 5/6 khác giờ — giữ nguyên). Việc xử lý
+lại là vô hại: chỉ xoá khi số tập **vượt** số vừa ghi *và* trùng ngày chiếu.
+
 ### Job D — đánh số lại thì phải xoá bản TRÙNG (02/11/2026)
 
 Lần chạy 17:21 dọn đúng 24 tập cũ nhưng `tensei-kizoku-…-3rd-season` còn **24
