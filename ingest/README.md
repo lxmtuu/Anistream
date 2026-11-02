@@ -70,8 +70,9 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 | D' | `tmdb --refresh` | TMDB: **tập MỚI** của bộ đang chiếu | hằng ngày |
 | E | `seasons` | AniList `relations` → **mùa thiếu** (SEQUEL + PREQUEL) | hằng ngày |
 | F | `jikan` | Jikan/MAL → lấp tập còn thiếu (`--fill-gaps`: cả bộ thiếu vài tập) | hằng ngày |
-| G | `check` | **kiểm bất biến dữ liệu**, vi phạm cứng → job ĐỎ | hằng ngày |
-| H | `reassign` | chuyển link bị gán **sai mùa** sang đúng mùa | chạy tay |
+| G | `add --anilist <id>` | **thêm đúng 1 bộ** từ AniList (bộ job khác không gặp) | chạy tay |
+| G' | `check` | **kiểm bất biến dữ liệu**, vi phạm cứng → job ĐỎ | hằng ngày |
+| H | `reassign` | chuyển link bị gán **sai mùa** sang đúng mùa · `--move-all` dời cả playlist | chạy tay |
 
 `all` = A + B + C + C' + D + D' + E + F + G. (`reassign` chạy tay — xem dưới.)
 
@@ -386,8 +387,32 @@ python3 -m ingest.reassign --apply         # gồm cả ca "probable"
 Quy tắc rất bảo thủ: offset = `episodes_total` của bộ cũ; đích phải là mùa sau
 theo slug và **chưa có link/tập nào**; mọi link phải ánh xạ vào `[1, tổng của
 đích]`; `exact` khi dãy số liên tục và khớp đúng tổng của đích. Ca không có entry
-mùa sau (HUNTER×HUNTER 63–148, DB chỉ có bản 62 tập) thì **để nguyên và báo**, còn
-hơn gán bừa sang bộ khác.
+mùa sau thì **để nguyên và báo**, còn hơn gán bừa sang bộ khác.
+
+### Job H' — `--move-all`: cả playlist thuộc về bộ KHÁC
+
+Ca HUNTER×HUNTER (02/11/2026): Muse VN đăng bản **2011 — 148 tập** (AniList
+11061), nhưng DB chỉ có bản **1999 — 62 tập** (AniList 136). Hai bản là quan hệ
+**Alternative** (không phải Sequel) nên `catalog`/`schedule`/`seasons` **không bao
+giờ** thêm được bản 2011. Kết quả: 148 link nằm ở entry 1999, 86 link vượt tổng
+bị loại → video nằm im.
+
+Muse đánh số theo đúng bộ 2011, nên dời sang entry 2011 **không đổi số**:
+
+```bash
+python3 -m ingest.main add --anilist 11061          # in ra slug của bộ 2011
+python3 -m ingest.reassign --move-all --from hunter-hunter \
+        --to-anilist 11061                          # xem trước
+python3 -m ingest.reassign --move-all --from hunter-hunter \
+        --to-anilist 11061 --apply
+python3 -m ingest.main check
+```
+
+Kiểm **hết** rồi mới ghi (sai một điều là bỏ toàn bộ): cả hai bộ phải tồn tại;
+đích có `episodes_total` ≥ số tập lớn nhất của nguồn; đích **chưa có link** (không
+trộn hai nguồn); nguồn phải có ít nhất 1 link. Sau khi dời, tập của nguồn do
+**chính link** sinh ra (không ngày chiếu, không tên) mà không còn video nào sẽ bị
+xoá — nếu không trang chi tiết vẫn hiện "62 tập" trống.
 
 ### Vì sao cần D' và E (2 lỗi cũ)
 

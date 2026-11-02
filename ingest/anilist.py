@@ -303,6 +303,26 @@ def to_episode_row(anime_id: int, number: int, airing_at: Any, title: str = "") 
     return row
 
 
+def media(media_id: int) -> Dict:
+    """Một entry AniList theo id, cùng bộ trường với catalog/lịch phát.
+
+    Vì sao cần: có bộ KHÔNG BAO GIỜ tự vào DB — catalog/schedule chỉ gặp bộ đang
+    chiếu hoặc theo mùa, `job_seasons` chỉ đi theo SEQUEL/PREQUEL. Ca thật
+    02/11/2026: Muse VN đăng "Hunter x Hunter" (bản 2011, **148 tập**) nhưng DB
+    chỉ có entry 1999 (62 tập, AniList 136); hai bản là quan hệ **Alternative**,
+    không phải Sequel ⇒ không job nào thêm được bản 2011 vào.
+    """
+    q = """
+    query ($id: Int) {
+      Media(id: $id) { %s }
+    }""" % MEDIA_FIELDS
+    data = gql(q, {"id": int(media_id)})
+    m = (data or {}).get("Media")
+    if not m or not m.get("id"):
+        raise RuntimeError(f"AniList không trả về media id={media_id}")
+    return m
+
+
 # ─────────────────────────────────────── airing window (cho job TMDB)
 WINDOW_FIELDS = """
   id idMal episodes status

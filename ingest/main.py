@@ -873,6 +873,42 @@ def looks_later_season(row) -> bool:
     return bool(_LATER_SEASON.search(text))
 
 
+def job_add(DB, anilist_id: int):
+    """(Job G) Thêm ĐÚNG MỘT bộ từ AniList theo id — bộ mà job khác không gặp.
+
+    Vì sao cần: catalog chạy theo mùa, schedule theo lịch phát, `seasons` chỉ đi
+    theo SEQUEL/PREQUEL. Bộ chỉ có quan hệ **Alternative** (VD: HUNTER×HUNTER
+    2011 vs bản 1999) không bao giờ tự vào — trong khi Muse VN có đủ 148 tập của
+    bản 2011. Thiếu entry đích thì link bị gán vào bộ 1999 (62 tập) và 86 video
+    vượt tổng, không ai xem được.
+
+    Trả số dòng đã upsert (0 nếu bộ đã có).
+    """
+    print(f"\n▶ Job G — thêm 1 bộ từ AniList (id {anilist_id})")
+    m = anilist.media(int(anilist_id))
+    title = (m.get("title") or {}).get("romaji") or m.get("id")
+    existing = DB.select(
+        "anime",
+        f"select=id,slug,episodes_total&anilist_id=eq.{int(anilist_id)}&limit=1")
+    if existing:
+        e = existing[0]
+        print(f"  · đã có: {e.get('slug')} (id {e.get('id')}, "
+              f"{e.get('episodes_total') or '?'} tập) → không thêm trùng")
+        return 0
+    print(f"  · {title} · {m.get('episodes') or '?'} tập · "
+          f"{m.get('seasonYear') or '?'} · {m.get('status')}")
+    rows, _ = _upsert_media(DB, [m])
+    n = len(rows)
+    got = DB.select("anime",
+                    f"select=slug,episodes_total&anilist_id=eq.{int(anilist_id)}&limit=1")
+    if not got:
+        # Không im lặng: ghi xong mà không đọc lại được là lỗi thật.
+        raise RuntimeError(f"đã upsert nhưng không đọc lại được anilist_id={anilist_id}")
+    print(f"  ✓ slug={got[0]['slug']} · {got[0].get('episodes_total') or '?'} tập")
+    DB.log_ingest("anilist", "add", True, n)
+    return n
+
+
 def job_seasons(DB, limit: int = 80):
     """Phát hiện mùa bị THIẾU qua quan hệ SEQUEL / PREQUEL của AniList.
 
@@ -1075,7 +1111,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="AniStream ingest worker")
     ap.add_argument("command", choices=["schedule", "catalog", "youtube", "tmdb",
                                         "seasons", "jikan", "episodes",
-                                        "check", "all"])
+                                        "check", "add", "all"])
     ap.add_argument("--hours", type=int, default=26)
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--limit", type=int, default=25, help="số video mỗi kênh")
@@ -1102,6 +1138,8 @@ def main(argv=None):
                     help="bỏ qua .cache/match_cache.json (ghép lại tên từ đầu)")
     ap.add_argument("--channel", default="",
                     help="chỉ xử lý 1 kênh (muse_vn | ani_one_asia)")
+    ap.add_argument("--anilist", type=int, default=0,
+                    help="job add: AniList id của bộ cần thêm (VD 11061)")
     ap.add_argument("--max-videos", type=int, default=5000,
                     help="giới hạn số video mỗi kênh khi --deep")
     args = ap.parse_args(argv)
@@ -1138,6 +1176,12 @@ def main(argv=None):
             total += job_jikan(DB, args.limit_jikan, args.only_airing, args.fill_gaps)
         if args.command == "episodes":
             total += job_link_episodes(DB)
+        if args.command == "add":
+            if not args.anilist:
+                # Nổ ngay, đừng chạy "thành công" mà không thêm gì.
+                print("\n✗ thiếu --anilist <id> (VD: --anilist 11061)")
+                return 2
+            total += job_add(DB, args.anilist)
         if args.command == "check":
             total += job_check(DB, strict=not args.no_strict)
         if args.command == "all":

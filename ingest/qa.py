@@ -126,7 +126,9 @@ def report(violations: Dict[str, Any]) -> str:
     if soft["link_vuot_tong"]:
         lines.append(f"  ⚠ link vượt tổng số tập: {len(soft['link_vuot_tong'])} "
                      f"(nghi ghép sai mùa — chạy `python3 -m ingest.reassign` "
-                     f"để xem kế hoạch; ĐỪNG xoá bằng audit --prune)")
+                     f"để xem kế hoạch; nếu cả playlist thuộc bộ KHÁC thì dùng "
+                     f"`--move-all --from <slug> --to-anilist <id>`; "
+                     f"ĐỪNG xoá bằng audit --prune)")
         for it in soft["link_vuot_tong"][:5]:
             lines.append(f"      · {it}")
     if soft["bo_co_link_0_tap"]:
