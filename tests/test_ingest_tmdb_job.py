@@ -348,15 +348,15 @@ class TestJobTmdb(unittest.TestCase):
         db = FakeDB([row], existing_episodes={5: [
             {"number": 1, "airing_at": "2024-04-07T00:00:00+00:00"}]})
         db.select_extra = {"episodes": [
-            {"number": 25, "airing_at": "2026-09-27T00:00:00+00:00"},
-            {"number": 36, "airing_at": "2027-06-06T00:00:00+00:00"},
+            {"id": 501, "number": 25, "airing_at": "2026-09-27T00:00:00+00:00"},
+            {"id": 502, "number": 36, "airing_at": "2027-06-06T00:00:00+00:00"},
         ]}
         _, out = self._run(db, seasons=(1,), total=36, meta=meta, eps=eps,
                            window={"from": start, "to": None})
         self.assertIn("dọn 1 tập trùng", out)
-        removed = [f.get("number") for t, f in db.deleted if t == "episodes"]
-        self.assertIn(25, removed)
-        self.assertNotIn(36, removed, "tập tương lai khác ngày chiếu phải giữ")
+        removed = [f.get("id") for t, f in db.deleted if t == "episodes"]
+        self.assertIn(501, removed, "phải xoá theo KHOÁ CHÍNH id")
+        self.assertNotIn(502, removed, "tập tương lai khác ngày chiếu phải giữ")
 
     def test_view_bao_tap_trung_thi_xu_ly_lai_du_da_co_tap(self):
         """Ca thật 02/11/2026: `tensei-kizoku-…-3rd-season` có 12 tập đúng +
@@ -375,13 +375,14 @@ class TestJobTmdb(unittest.TestCase):
             {"number": 1, "airing_at": "2026-09-27T00:00:00+00:00"}]})
         db.thieu_tap = [dict(row, tmdb_checked_at=None)]   # view báo "sai"
         db.select_extra = {"episodes": [
-            {"number": 25, "airing_at": "2026-09-27T00:00:00+00:00"}]}
+            {"id": 501, "number": 25,
+             "airing_at": "2026-09-27T00:00:00+00:00"}]}
         _, out = self._run(db, seasons=(1,), total=36, meta=meta, eps=eps,
                            window={"from": start, "to": None})
         self.assertIn("danh sách tập SAI", out)
         self.assertIn("dọn 1 tập trùng", out)
-        removed = [f.get("number") for t, f in db.deleted if t == "episodes"]
-        self.assertIn(25, removed)
+        removed = [f.get("id") for t, f in db.deleted if t == "episodes"]
+        self.assertIn(501, removed)
 
     def test_khong_co_ngay_chieu_anilist_thi_bao_ro(self):
         """Không đọc được ngày chiếu → KHÔNG ghi, và nói rõ vì sao (không im)."""
