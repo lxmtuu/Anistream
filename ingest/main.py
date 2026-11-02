@@ -572,6 +572,28 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                             detail, season_no, hint_season, row.get("year"),
                             row.get("episodes_total"), season_count=n_season)
                         if not max_number:
+                            # `seasons[].episode_count` trong detail TMDB hay LỆCH
+                            # so với danh sách tập thật (báo 12 nhưng trả 24) →
+                            # `merged_year_candidate` đã bỏ qua ca này. Thử lại
+                            # luật "gộp mùa" với SỐ TẬP THẬT đọc được.
+                            # Ca thật: yozakura-…-2nd-season (12 tập) — 24 = 2×12.
+                            sp2 = tmdb.split_season_offset(
+                                detail, hint_season, row.get("episodes_total"),
+                                season_count=n_season)
+                            if sp2:
+                                eps_split = tmdb.episode_rows(
+                                    row["id"], season, matched,
+                                    max_number=row.get("episodes_total"),
+                                    offset=sp2["offset"])
+                                if eps_split:
+                                    DB.upsert("episodes", eps_split,
+                                              on_conflict="anime_id,number")
+                                    eps_written += len(eps_split)
+                                    print(f"      + {len(eps_split)} tập (gộp mùa "
+                                          f"— trừ {sp2['offset']}, TMDB "
+                                          f"{n_season} tập)")
+                                    _mark_checked(DB, row)
+                                    continue
                             # Luật cuối: cùng một season nhưng TMDB chứa NHIỀU mùa
                             # liền nhau (24 = 12 + 12, 37 = 25 + 12). Tách theo
                             # NĂM chiếu của entry AniList; hàm tự kiểm số lượng

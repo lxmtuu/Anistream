@@ -851,6 +851,26 @@ def explain(row: Dict[str, Any], limit: int = 5) -> int:
             for sn in seasons:
                 print(f"        ↳ mùa {sn['number']}: {sn['count']} tập "
                       f"({sn['air_date'] or '?'})")
+            # Phân bố NGÀY CHIẾU của mùa đầu: cần để biết vì sao "tách theo năm"
+            # không chạy (TMDB thiếu ngày? tập nằm ở năm khác?).
+            try:
+                first = fetch_season(r["id"], seasons[0]["number"])
+            except TmdbError as e:
+                print(f"        ↳ không đọc được danh sách tập: {e}")
+                first = {}
+            buckets: Dict[str, int] = {}
+            no_date = 0
+            for e in first.get("episodes") or []:
+                air = (e.get("air_date") or "")[:4]
+                if air.isdigit():
+                    buckets[air] = buckets.get(air, 0) + 1
+                else:
+                    no_date += 1
+            if buckets or no_date:
+                detail_txt = " · ".join(f"{y}: {c} tập"
+                                        for y, c in sorted(buckets.items()))
+                print(f"        ↳ ngày chiếu: {detail_txt or '—'}"
+                      + (f" · {no_date} tập KHÔNG có ngày" if no_date else ""))
             no, why = pick_season(det, row.get("year"),
                                   row.get("episodes_total"), hint)
             extra = ""

@@ -583,6 +583,32 @@ class TestExplain(unittest.TestCase):
         self.assertIn("mùa 1: 12 tập", out)
         self.assertIn("TỪ CHỐI", out)
 
+    def test_in_phan_bo_ngay_chieu(self):
+        """Cần thấy "năm nào có bao nhiêu tập" để biết vì sao tách theo năm trượt
+        (TMDB thiếu ngày? tập nằm ở năm khác?)."""
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        row = {"slug": "yozakura-2nd", "title_english": "Mission: Yozakura S2",
+               "year": 2026, "episodes_total": 12, "tmdb_id": None}
+        res = [{"id": 216467, "name": "Mission: Yozakura Family",
+                "first_air_date": "2024-04-07"}]
+        detail = {"seasons": [{"season_number": 1, "episode_count": 24,
+                               "air_date": "2024-04-07"}]}
+        eps = [{"episode_number": i, "air_date": "2025-01-%02d" % (i % 28 + 1),
+                "name": f"T{i}"} for i in range(1, 25)]
+        with patch.object(tmdb, "_get", return_value={"results": res}), \
+                patch.object(tmdb, "fetch_detail", return_value=detail), \
+                patch.object(tmdb, "fetch_season",
+                             return_value={"episodes": eps}), \
+                patch.object(tmdb.time, "sleep"):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                tmdb.explain(row)
+        out = buf.getvalue()
+        self.assertIn("ngày chiếu:", out)
+        self.assertIn("2025: 24 tập", out)
+
 
 class TestGopMuaTrenTmdb(unittest.TestCase):
     """TMDB gộp nhiều mùa AniList vào MỘT season.

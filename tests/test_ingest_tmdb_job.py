@@ -200,8 +200,34 @@ class TestJobTmdb(unittest.TestCase):
         nums = [r["number"] for r in upserts[0][1]]
         self.assertEqual(nums, list(range(1, 13)))
         self.assertTrue(all(r["airing_at"].startswith("2026")
+                            for r in upserts[0][1]),
+                        "phải lấy đúng 12 tập của mùa 2 (năm 2026)")
+        # Hai đường đều đúng cho ca này: "gộp mùa — trừ 12" (24 = 2×12, cắt nửa
+        # sau) hoặc "tách theo năm 2026". Chỉ cấm việc ghi bừa.
+        self.assertTrue("tách theo" in out or "gộp mùa" in out, out)
+
+    def test_detail_bao_sai_so_tap_van_tach_duoc(self):
+        """`seasons[].episode_count` = 12 nhưng danh sách tập trả 24.
+
+        `merged_year_candidate` (dùng số trong detail) bỏ qua ca này, nên phải
+        thử lại `split_season_offset` với SỐ TẬP THẬT đọc được (24 = 2×12).
+        """
+        row = dict(ROW, episodes_total=12, year=2026,
+                   title_english="Mission: Yozakura Family Season 2")
+        eps, n = [], 1
+        for y, c in ((2025, 12), (2026, 12)):     # 24 tập, năm 2026 nằm SAU
+            for i in range(c):
+                eps.append({"episode_number": n, "name": f"T{n}",
+                            "air_date": f"{y}-02-{i % 28 + 1:02d}"})
+                n += 1
+        meta = {1: {"episode_count": 12, "air_date": "2025-02-10"}}
+        db = FakeDB([row])
+        _, out = self._run(db, seasons=(1,), total=24, meta=meta, eps=eps)
+        upserts = [u for u in db.upserted if u[0] == "episodes"]
+        self.assertEqual(len(upserts), 1, out)
+        self.assertEqual([r["number"] for r in upserts[0][1]], list(range(1, 13)))
+        self.assertTrue(all(r["airing_at"].startswith("2026")
                             for r in upserts[0][1]))
-        self.assertIn("tách theo", out)
 
     def test_khong_tach_duoc_thi_van_khong_ghi(self):
         """Năm không có tập nào khớp số lượng → vẫn KHÔNG ghi (không ghép bừa)."""
