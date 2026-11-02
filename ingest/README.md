@@ -770,6 +770,35 @@ tự động loại shorts/clip (< 4 phút) chính xác hơn nhiều so với đ
 
 Sau lần backfill đầu, cron 6h chỉ cần chạy `youtube` (không `--deep`) để bắt tập mới.
 
+**Cron 03:30 hằng ngày tự backfill sâu** (`--deep --max-videos 2000`). Vì sao phải
+tự động: đo 02/11/2026, DB có **163 bộ / 2028 tập metadata nhưng chỉ 485 link** →
+**94 bộ** liệt kê đủ tập mà **không có video nào**. Nguyên nhân: cron 6h chỉ đọc RSS
+(15 video mới nhất/kênh), nên mọi tập cũ hơn 15 video gần nhất **không bao giờ**
+được lấy lại. `tests/test_workflow_cron.py` chặn tái diễn: mọi `- cron:` khai báo
+đều phải có nhánh `case` tương ứng (thiếu nhánh ⇒ rơi vào `*)` ⇒ chạy `all`, CI
+vẫn xanh nhưng việc thật không xảy ra).
+
+## Job J — độ phủ nội dung (`coverage`)
+
+`check` chỉ bắt **mâu thuẫn** dữ liệu. Câu người dùng thật sự hỏi là *"bộ này có
+xem được không?"* — nên có job chỉ-đọc in ra:
+
+```bash
+python3 -m ingest.main coverage
+```
+
+```
+▶ Job J — độ phủ nội dung (bộ nào xem được thật)
+  · 163 bộ · 2028 tập metadata · 485 link
+  · 69 bộ CÓ video · 94 bộ chỉ có metadata (0 video) · 0 bộ trống hoàn toàn
+  · tập có video: 485/2028 (23.9%)
+  ⚠ 94 bộ liệt kê tập nhưng KHÔNG có video nào …
+```
+
+Quy ước đếm: một bộ "có video" khi có **ít nhất 1** dòng `streaming_links`. Link có
+`episode_number = 0` (bản gộp cả bộ) **không** được cộng vào "tập có video" vì nó
+không phải một tập cụ thể. Job chạy tự động trong cron 20:40 sau `check`.
+
 ### Backfill an toàn: ghi theo từng kênh + cache ra đĩa
 
 Bản đầu gom video **cả 2 kênh** rồi mới ghép tên và ghi DB một lần. Hệ quả thật

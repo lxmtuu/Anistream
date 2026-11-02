@@ -21,6 +21,7 @@ import datetime as dt
 import re
 import sys
 import time
+from typing import Dict
 
 from . import anilist, config, db as dbmod, jikan, match, qa, tmdb, youtube
 
@@ -1164,6 +1165,59 @@ def job_jikan(DB, limit: int = 40, only_airing: bool = False,
 
 
 # ─────────────────────────────────────────────── Job G
+def job_coverage(DB) -> int:
+    """Báo cáo ĐỘ PHỦ nội dung: bao nhiêu bộ THẬT SỰ xem được.
+
+    Vì sao cần: `check` chỉ kiểm tính nhất quán, không trả lời câu hỏi người dùng
+    hỏi nhiều nhất — "bộ này có xem được không?". Đo 02/11/2026: **163 bộ / 2028
+    tập metadata nhưng chỉ 485 link**, tức ~94 bộ có danh sách tập mà **0 video**
+    (black-clover 170 tập, one-punch-man-2 12, dandadan-2nd 12…). Trang chi tiết
+    vẫn mở được, vẫn liệt kê tập, nhưng bấm vào không có gì để xem.
+
+    Chỉ ĐỌC và in. Trả về số bộ "có tập mà 0 video" để cron có thể theo dõi.
+    """
+    print("\n▶ Job J — độ phủ nội dung (bộ nào xem được thật)")
+    if DB.dry:
+        print("  [dry-run] cần Supabase để đọc dữ liệu → bỏ qua")
+        return 0
+    anime = DB.select_all("anime", "select=id,slug,status,episodes_total,popularity")
+    eps = DB.select_all("episodes", "select=anime_id,number")
+    links = DB.select_all("streaming_links", "select=anime_id,episode_number")
+
+    eps_by: Dict[int, set] = {}
+    for e in eps:
+        eps_by.setdefault(e.get("anime_id"), set()).add(e.get("number"))
+    link_eps: Dict[int, set] = {}
+    for l in links:
+        aid, n = l.get("anime_id"), l.get("episode_number")
+        if isinstance(n, int) and n > 0:
+            link_eps.setdefault(aid, set()).add(n)
+        else:
+            link_eps.setdefault(aid, set())
+
+    co_video = [a for a in anime if link_eps.get(a["id"])]
+    chi_metadata = [a for a in anime if eps_by.get(a["id"]) and not link_eps.get(a["id"])]
+    khong_gi = [a for a in anime
+                if not eps_by.get(a["id"]) and not link_eps.get(a["id"])]
+    chi_metadata.sort(key=lambda a: -(a.get("popularity") or 0))
+
+    tong_tap = sum(len(v) for v in eps_by.values())
+    tap_co_video = sum(len(v) for v in link_eps.values())
+    print(f"  · {len(anime)} bộ · {tong_tap} tập metadata · {len(links)} link")
+    print(f"  · {len(co_video)} bộ CÓ video · {len(chi_metadata)} bộ chỉ có "
+          f"metadata (0 video) · {len(khong_gi)} bộ trống hoàn toàn")
+    pct = (100.0 * tap_co_video / tong_tap) if tong_tap else 0.0
+    print(f"  · tập có video: {tap_co_video}/{tong_tap} ({pct:.1f}%)")
+    if chi_metadata:
+        print(f"  ⚠ {len(chi_metadata)} bộ liệt kê tập nhưng KHÔNG có video nào "
+              f"(nguồn Muse VN chưa có hoặc job C chưa ghép được tên):")
+        for a in chi_metadata[:10]:
+            print(f"      - {a.get('slug')}  "
+                  f"({len(eps_by.get(a['id'], ()))} tập, "
+                  f"tổng {a.get('episodes_total') or '?'})")
+    return len(chi_metadata)
+
+
 def _nen_hien(a: dict, co_tap: set, co_link: set) -> bool:
     """Bộ này có nên xuất hiện trong danh sách (shelf, tìm kiếm, liên quan)?
 
@@ -1265,7 +1319,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="AniStream ingest worker")
     ap.add_argument("command", choices=["schedule", "catalog", "youtube", "tmdb",
                                         "seasons", "jikan", "episodes",
-                                        "check", "add", "publish", "all"])
+                                        "check", "add", "publish", "coverage",
+                                        "all"])
     ap.add_argument("--hours", type=int, default=26)
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--limit", type=int, default=25, help="số video mỗi kênh")
@@ -1345,6 +1400,8 @@ def main(argv=None):
             total += job_add(DB, args.anilist)
         if args.command == "publish":
             total += job_publish(DB)
+        if args.command == "coverage":
+            total += job_coverage(DB)
         if args.command == "check":
             total += job_check(DB, strict=not args.no_strict)
         if args.command == "all":
