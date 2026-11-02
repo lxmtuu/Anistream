@@ -639,7 +639,13 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                             DB.upsert("episodes", eps_w,
                                       on_conflict="anime_id,number")
                             eps_written += len(eps_w)
-                            n_pruned = _prune_episodes_outside(DB, row, win)
+                            try:
+                                n_pruned = _prune_episodes_outside(DB, row, win)
+                            except Exception as e:      # noqa: BLE001
+                                # Dọn là bước phụ: lỗi dọn KHÔNG được làm mất
+                                # việc đã ghi, nhưng phải báo ra (02/11/2026).
+                                n_pruned = 0
+                                print(f"      ! dọn tập cũ lỗi ({str(e)[:110]})")
                             print(f"      + {len(eps_w)} tập (theo khoảng chiếu "
                                   f"{win['from']} → {win.get('to') or '…'}, "
                                   f"TMDB {n_season} tập"

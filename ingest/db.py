@@ -15,6 +15,12 @@ from . import config
 BATCH = 200          # số row mỗi request PostgREST
 
 
+# Toán tử PostgREST được phép truyền thẳng trong `filters` (mặc định `eq.`).
+# Dùng CHUNG cho `patch` và `delete` — lệch nhau giữa hai hàm đã gây lỗi thật
+# 02/11/2026: `patch` nhận `lt.…` còn `delete` thì không ⇒ 400/22007.
+_FILTER_OPS = ("eq", "neq", "lt", "lte", "gt", "gte", "in", "is")
+
+
 def _group_by_keys(rows: List[Dict]) -> List[List[Dict]]:
     """Chia lô thành các nhóm CÓ CÙNG BỘ KHOÁ (giữ nguyên thứ tự).
 
@@ -134,14 +140,10 @@ class DB:
         if self.dry:
             print(f"  [dry-run] patch {table} {filters} ← {list(values)}")
             return 0
-        # Cho phép truyền toán tử PostgREST sẵn ("lt.2025-01-01") để xoá theo
-        # KHOẢNG; mặc định vẫn là eq.
-        ops = ("eq", "neq", "lt", "lte", "gt", "gte", "in", "is")
-        params = {
-            k: (v if isinstance(v, str) and v.split(".", 1)[0] in ops
-                else f"eq.{v}")
-            for k, v in filters.items()
-        }
+        params = {k: (v if isinstance(v, str)
+                      and v.split(".", 1)[0] in _FILTER_OPS
+                      else f"eq.{v}")
+                  for k, v in filters.items()}
         r = requests.patch(
             f"{self.url}/rest/v1/{table}",
             params=params,
@@ -168,7 +170,13 @@ class DB:
         if self.dry:
             print(f"  [dry-run] delete {table} {filters}")
             return 0
-        params = {k: f"eq.{v}" for k, v in filters.items()}
+        # Như `patch`: cho phép toán tử PostgREST sẵn ("lt.2026-07-06") để xoá
+        # theo KHOẢNG. Lỗi thật 02/11/2026: hàm này chỉ ghép `eq.` nên
+        # `airing_at=eq.lt.2026-07-06` → Postgres 22007 (invalid timestamp).
+        params = {k: (v if isinstance(v, str)
+                      and v.split(".", 1)[0] in _FILTER_OPS
+                      else f"eq.{v}")
+                  for k, v in filters.items()}
         r = requests.delete(
             f"{self.url}/rest/v1/{table}",
             params=params,
