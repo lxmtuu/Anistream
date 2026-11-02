@@ -311,11 +311,46 @@ def first_season_cut(
     return int(episodes_total)
 
 
+def split_season_offset(
+    detail: Dict[str, Any],
+    season_hint: Optional[int],
+    episodes_total: Optional[int],
+    season_count: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """TMDB gộp NHIỀU mùa AniList vào MỘT season → trả mùa + số tập cần trừ.
+
+    Ca thật 02/11/2026: `dandadan-2nd-season` (AniList 12 tập, tên ghi mùa 2) trỏ
+    tới TMDB 240411 "DAN DA DAN" — TMDB chỉ có **một** season 24 tập (mùa 1 + mùa 2
+    gộp). `pick_season` từ chối (12 ≠ 24) nên bộ **lặng lẽ** không có tập nào.
+
+    Nay: khi TMDB chỉ có 1 mùa và số tập của nó ≈ `season_hint × tổng` (lệch ≤2),
+    lấy nửa thứ `season_hint` và **trừ offset** `(hint−1) × tổng` rồi đánh số lại.
+
+    Bảo thủ: chỉ nhận khi số mùa của AniList và bội số tập khớp nhau; lệch là bỏ.
+    """
+    if not isinstance(season_hint, int) or season_hint < 2:
+        return None
+    if not isinstance(episodes_total, int) or episodes_total <= 0:
+        return None
+    seasons = season_candidates(detail)
+    if len(seasons) != 1:
+        return None                      # nhiều mùa riêng → dùng pick_season
+    count = season_count if isinstance(season_count, int) else seasons[0]["count"]
+    if not isinstance(count, int):
+        return None
+    if abs(count - season_hint * episodes_total) > 2:
+        return None
+    return {"season": seasons[0]["number"],
+            "offset": (season_hint - 1) * episodes_total,
+            "count": count}
+
+
 def episode_rows(
     anime_id: int,
     season: Dict[str, Any],
     single_season: bool,
     max_number: Optional[int] = None,
+    offset: int = 0,
 ) -> List[Dict[str, Any]]:
     """Đổi season TMDB → rows cho bảng `episodes`. Bỏ qua nếu không đủ tin cậy."""
     if not single_season:
@@ -325,6 +360,10 @@ def episode_rows(
         num = e.get("episode_number")
         if not isinstance(num, int) or num <= 0:
             continue
+        if offset:
+            num -= int(offset)            # TMDB gộp mùa → đánh số lại (xem
+            if num <= 0:                  # `split_season_offset`)
+                continue
         if isinstance(max_number, int) and max_number > 0 and num > max_number:
             continue                      # cắt phần dư (xem `first_season_cut`)
         air = e.get("air_date")

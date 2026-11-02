@@ -420,8 +420,21 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                 row.get("title_native"))
             season_no, why = tmdb.pick_season(
                 detail, row.get("year"), row.get("episodes_total"), hint_season)
+
+            # TMDB gộp nhiều mùa AniList vào MỘT season (DAN DA DAN: 1 mùa
+            # 24 tập = mùa 1 + mùa 2). `pick_season` từ chối ⇒ trước đây bộ
+            # LẶNG LẼ không có tập nào. Nay lấy nửa thứ `hint` rồi trừ offset.
+            split = None
+            if season_no is None:
+                split = tmdb.split_season_offset(
+                    detail, hint_season, row.get("episodes_total"))
+                if split:
+                    season_no = split["season"]
+                    why = (f"gộp mùa — trừ {split['offset']} tập "
+                           f"(TMDB {split['count']} tập)")
             matched = season_no is not None
-            if not matched and len(tmdb.real_seasons(detail)) > 1:
+            if not matched:
+                # Không im lặng nữa: nói rõ vì sao, kể cả khi TMDB chỉ có 1 mùa.
                 multi_season.append(f"{label}  ({why})")
 
             hint = None
@@ -469,7 +482,11 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                     plausible = tmdb.episodes_plausible(
                         row.get("episodes_total"), n_season)
                     max_number = None
-                    if not plausible:
+                    if split:
+                        # đã trừ offset khi đánh số → chỉ giữ [1, tổng]
+                        max_number = row.get("episodes_total")
+                        plausible = True
+                    elif not plausible:
                         # TMDB gộp nhiều mùa/nhiều cour vào MỘT mùa → nhiều tập hơn
                         # AniList. Nếu ĐÂY là mùa đầu thì tập 1..N vẫn đúng, cắt
                         # phần dư (9 bộ rơi vào cảnh này ngày 02/11/2026).
@@ -484,8 +501,9 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                         if max_number:
                             print(f"      · TMDB có {n_season} tập, cắt còn "
                                   f"{max_number} (mùa đầu của series)")
-                        eps = tmdb.episode_rows(row["id"], season, matched,
-                                                max_number=max_number)
+                        eps = tmdb.episode_rows(
+                            row["id"], season, matched, max_number=max_number,
+                            offset=(split or {}).get("offset", 0))
                         if eps:
                             DB.upsert("episodes", eps, on_conflict="anime_id,number")
                             eps_written += len(eps)
@@ -512,7 +530,7 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
     if no_vi:
         print(f"  ⚠ {len(no_vi)} anime có trên TMDB nhưng CHƯA có bản dịch tiếng Việt")
     if multi_season:
-        print(f"  ⚠ {len(multi_season)} anime nhiều mùa mà KHÔNG xác định được mùa nào "
+        print(f"  ⚠ {len(multi_season)} anime KHÔNG xác định được mùa "
               f"→ chỉ lấy tên/tóm tắt, không lấy tập:")
         for n in multi_season[:8]:
             print(f"      - {n}")

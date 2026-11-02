@@ -139,6 +139,20 @@ tập 1..N của AniList → cắt phần dư là an toàn.
 
 Không thoả điều nào → hành vi cũ: **không ghi** và báo ra danh sách "KHÔNG hợp".
 
+### Job D — TMDB gộp nhiều mùa vào MỘT season → trừ offset (02/11/2026)
+
+`python3 -m ingest.tmdb --slug dandadan-2nd-season` cho thấy job **tìm thấy** TMDB
+(240411, điểm 1.000) nhưng bộ vẫn 0 tập: TMDB chỉ có **một** season 24 tập (mùa 1 +
+mùa 2 gộp), `pick_season` từ chối vì 12 ≠ 24 — và **không in ra dòng nào**, nên
+`check` cũng im lặng.
+
+Nay `tmdb.split_season_offset()` xử lý: TMDB chỉ có 1 mùa **và** số tập của nó
+≈ `season_hint × episodes_total` (lệch ≤ 2) → lấy nửa thứ `hint`, **trừ offset**
+`(hint−1) × tổng` rồi đánh số lại 1..N (giữ nguyên tên + ngày chiếu thật của TMDB).
+
+Kèm theo: bộ nào không xác định được mùa thì **luôn** được liệt kê (trước đây chỉ
+báo khi TMDB có nhiều hơn 1 mùa — đó là lý do ca DAN DA DAN không xuất hiện ở đâu).
+
 ### Job D — soi một bộ: `python3 -m ingest.tmdb`
 
 Khi log ghi "không tìm được trên TMDB" mà bạn tin là TMDB có, chạy:

@@ -557,3 +557,41 @@ class TestExplain(unittest.TestCase):
         self.assertIn("283428", out)
         self.assertIn("✓", out)
         self.assertIn("✗", out)
+
+
+class TestGopMuaTrenTmdb(unittest.TestCase):
+    """TMDB gộp nhiều mùa AniList vào MỘT season.
+
+    Ca thật 02/11/2026: `dandadan-2nd-season` (AniList 12 tập, tên ghi mùa 2) trỏ
+    tới TMDB 240411 "DAN DA DAN" chỉ có 1 season 24 tập. `pick_season` từ chối và
+    bộ **lặng lẽ** không có tập nào — `check` không hề báo gì.
+    """
+
+    D24 = {"seasons": [{"season_number": 1, "episode_count": 24,
+                        "air_date": "2024-10-04"}]}
+
+    def test_mua_2_cua_season_24_tap(self):
+        got = tmdb.split_season_offset(self.D24, 2, 12)
+        self.assertEqual(got["season"], 1)
+        self.assertEqual(got["offset"], 12)
+
+    def test_khong_nhan_mua_1(self):
+        self.assertIsNone(tmdb.split_season_offset(self.D24, 1, 12))
+
+    def test_khong_nhan_khi_boi_so_khong_khop(self):
+        """3 mùa × 12 = 36 ≠ 24 → không phải bộ này."""
+        self.assertIsNone(tmdb.split_season_offset(self.D24, 3, 12))
+
+    def test_khong_nhan_khi_tmdb_co_nhieu_mua(self):
+        d = {"seasons": [
+            {"season_number": 1, "episode_count": 12, "air_date": "2024-10-04"},
+            {"season_number": 2, "episode_count": 12, "air_date": "2025-07-04"}]}
+        self.assertIsNone(tmdb.split_season_offset(d, 2, 12))
+
+    def test_danh_so_lai_sau_khi_tru_offset(self):
+        season = {"episodes": [
+            {"episode_number": i, "air_date": "2025-07-0%d" % (i % 9 + 1),
+             "name": f"T{i}"} for i in range(1, 25)]}
+        rows = tmdb.episode_rows(9, season, True, max_number=12, offset=12)
+        self.assertEqual([r["number"] for r in rows], list(range(1, 13)))
+        self.assertEqual(rows[0]["title"], "T13")   # giữ tên/ngày thật của TMDB
