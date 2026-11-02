@@ -700,3 +700,50 @@ class TestBoQuaBoVuaHoiTmdb(unittest.TestCase):
     def test_cutoff_dung_so_ngay(self):
         self.assertEqual(tmdb.stale_cutoff(7, self.NOW), "2026-10-26T12:00:00")
         self.assertEqual(tmdb.stale_cutoff(1, self.NOW), "2026-11-01T12:00:00")
+
+
+class TestDonMuaTachTheoNam(unittest.TestCase):
+    """TMDB dồn nhiều mùa vào MỘT season với số tập "lẻ".
+
+    Ca thật 02/11/2026 (`explain --slug kusuriya-no-hitorigoto-2nd-season`):
+    TMDB 220542 có **một** mùa **60 tập** = mùa 1 (24) + mùa 2 (24) + mùa 3 (12).
+    Luật `split_season_offset` đòi 60 ≈ 2×24 nên trượt (60 ≠ 48); nhưng tập của
+    mùa 2 tách được bằng NGÀY CHIẾU (năm 2025).
+    """
+
+    @staticmethod
+    def _season():
+        eps, n = [], 1
+        for y, c in ((2023, 24), (2025, 24), (2026, 12)):
+            for i in range(c):
+                eps.append({"episode_number": n,
+                            "air_date": f"{y}-01-{i % 28 + 1:02d}",
+                            "name": f"T{n}"})
+                n += 1
+        return {"episodes": eps}
+
+    def test_lay_dung_24_tap_cua_nam_2025(self):
+        rows = tmdb.episode_rows_by_year(7, self._season(), 2025, 24)
+        self.assertEqual([r["number"] for r in rows], list(range(1, 25)))
+        self.assertEqual(rows[0]["title"], "T25", "giữ tên/ngày thật của TMDB")
+        self.assertTrue(rows[0]["airing_at"].startswith("2025"))
+
+    def test_nam_khong_co_tap_thi_tra_rong(self):
+        self.assertEqual(tmdb.episode_rows_by_year(7, self._season(), 2024, 24), [])
+
+    def test_so_tap_lech_nhieu_thi_tu_choi(self):
+        """Mùa vắt qua 2 năm (12 + 12) tách theo năm ra 12 ≠ 24 → bỏ."""
+        self.assertEqual(tmdb.episode_rows_by_year(7, self._season(), 2026, 24), [])
+
+    def test_ung_vien_chi_khi_nhieu_hon_han(self):
+        D = {"seasons": [{"season_number": 1, "episode_count": 60,
+                          "air_date": "2023-10-22"}]}
+        self.assertEqual(tmdb.merged_year_candidate(D, 2, 2025, 24), 1)
+        self.assertIsNone(tmdb.merged_year_candidate(D, 1, 2025, 24))
+        self.assertIsNone(tmdb.merged_year_candidate(D, 2, None, 24))
+
+    def test_khong_nhan_khi_tmdb_nhieu_mua_rieng(self):
+        D = {"seasons": [
+            {"season_number": 1, "episode_count": 24, "air_date": "2023-10-22"},
+            {"season_number": 2, "episode_count": 24, "air_date": "2025-01-10"}]}
+        self.assertIsNone(tmdb.merged_year_candidate(D, 2, 2025, 24))

@@ -459,6 +459,18 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                         no = sp["season"]
                         why_ = (f"gộp mùa — trừ {sp['offset']} tập "
                                 f"(TMDB {sp['count']} tập)")
+                # TMDB dồn NHIỀU mùa vào 1 season với số tập lẻ (60 = 24+24+12):
+                # tách theo NĂM chiếu của entry AniList (xem
+                # `episode_rows_by_year`). Cần ngày chiếu nên quyết định ở dưới.
+                if no is None:
+                    yno = tmdb.merged_year_candidate(
+                        det, hint_season, row.get("year"),
+                        row.get("episodes_total"))
+                    if yno is not None:
+                        no = yno
+                        why_ = (f"dồn mùa — tách theo năm {row.get('year')} "
+                                f"(TMDB {yno} mùa gộp)")
+                        sp = {"season": yno, "offset": 0, "by_year": True}
                 return no, why_, sp
 
             # TMDB có thể trả NHIỀU series cho cùng một bộ (đo 02/11/2026:
@@ -525,6 +537,26 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                     season = tmdb.fetch_season(best["id"], season_no)
                     n_season = len([e for e in (season.get("episodes") or [])
                                     if isinstance(e.get("episode_number"), int)])
+                    if (split or {}).get("by_year"):
+                        # TMDB dồn nhiều mùa → lấy tập có NGÀY CHIẾU đúng năm
+                        # của entry AniList, đánh số lại 1..N. Tự kiểm số lượng
+                        # (lệch > 2 thì trả rỗng → không ghi gì).
+                        eps = tmdb.episode_rows_by_year(
+                            row["id"], season, row.get("year") or 0,
+                            row.get("episodes_total") or 0)
+                        if eps:
+                            DB.upsert("episodes", eps,
+                                      on_conflict="anime_id,number")
+                            eps_written += len(eps)
+                            print(f"      + {len(eps)} tập (dồn mùa, tách theo "
+                                  f"năm {row.get('year')} trong {n_season} tập TMDB)")
+                        else:
+                            implausible.append(
+                                f"{label}  (dồn mùa nhưng năm {row.get('year')} "
+                                f"không khớp {row.get('episodes_total')} tập)")
+                        _mark_checked(DB, row)
+                        continue
+
                     plausible = tmdb.episodes_plausible(
                         row.get("episodes_total"), n_season)
                     max_number = None
