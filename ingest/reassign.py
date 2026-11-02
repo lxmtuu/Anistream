@@ -306,6 +306,67 @@ def move_all(DB, from_slug: str, to_slug: str, dry: bool = True) -> int:
     return len(links)
 
 
+def move_over(DB, from_slug: str, to_slug: str, dry: bool = True) -> int:
+    """Dời **phần VƯỢT TỔNG** của bộ nguồn sang bộ đích, đánh số lại theo offset.
+
+    Khác `move_all` (dời cả playlist, giữ số): ở đây nguồn đúng là bộ đó, chỉ có
+    vài tập nằm NGOÀI tổng — thường là OVA/OAD được Muse đánh số tiếp.
+
+    Ca thật 02/11/2026: `uq-holder-mahou-sensei-negima-2` (TV, **12 tập**) có
+    15 link; tập 13–15 là 3 **OAD** ("Amor Primus", "Eternal First Kiss",
+    "Karin-senpai no Ienai Himitsu") mà AniList để riêng ở "UQ HOLDER! OVA"
+    (AniList 98999, 3 tập). Không có entry đó thì 3 video không ai xem được.
+
+    offset = `episodes_total` của nguồn (Muse đánh số tiếp). Kiểm hết rồi mới ghi.
+    """
+    src = DB.select("anime", f"select=id,slug,episodes_total&slug=eq.{from_slug}&limit=1")
+    dst = DB.select("anime", f"select=id,slug,episodes_total&slug=eq.{to_slug}&limit=1")
+    if not src:
+        raise RuntimeError(f"không có anime slug={from_slug}")
+    if not dst:
+        raise RuntimeError(f"không có anime slug={to_slug}")
+    src, dst = src[0], dst[0]
+    total_src = src.get("episodes_total")
+    total_dst = dst.get("episodes_total")
+    if not isinstance(total_src, int) or total_src <= 0:
+        raise RuntimeError(f"{from_slug} chưa biết tổng số tập")
+    links = DB.select_all(
+        "streaming_links",
+        f"select=id,episode_number&anime_id=eq.{src['id']}&episode_number=gt.0")
+    bad = [l for l in links if int(l["episode_number"]) > total_src]
+    if not bad:
+        print(f"  · {from_slug} không có link vượt {total_src} tập → không cần dời")
+        return 0
+    mapped = [int(l["episode_number"]) - total_src for l in bad]
+    if min(mapped) < 1:
+        raise RuntimeError("có link vượt tổng nhưng trừ offset ra < 1 — kiểm lại")
+    if isinstance(total_dst, int) and total_dst > 0 and max(mapped) > total_dst:
+        raise RuntimeError(
+            f"{to_slug} chỉ có {total_dst} tập, không nhận nổi tập {max(mapped)}")
+    taken = {int(l["episode_number"]) for l in DB.select_all(
+        "streaming_links", f"select=episode_number&anime_id=eq.{dst['id']}")}
+    if taken & set(mapped):
+        raise RuntimeError(f"{to_slug} đã có link trùng số {sorted(taken & set(mapped))}")
+
+    print(f"\n▶ Dời {len(bad)} link vượt tổng: {from_slug} (>{total_src} tập) "
+          f"→ {to_slug} (tập {min(mapped)}–{max(mapped)} / "
+          f"{total_dst or '?'} tập)")
+    if dry:
+        print("  (chưa ghi gì — thêm --apply để thực hiện)")
+        return 0
+
+    for l, num in zip(bad, mapped):
+        DB.patch("streaming_links", {"id": l["id"]},
+                 {"anime_id": dst["id"], "episode_number": num})
+    DB.upsert("episodes",
+              [{"anime_id": dst["id"], "number": n, "title": None,
+                "airing_at": None} for n in mapped],
+              on_conflict="anime_id,number")
+    print(f"  ✓ dời {len(bad)} link · {len(mapped)} tập cho {to_slug}")
+    DB.log_ingest("links", "move_over", True, len(bad))
+    return len(bad)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Chuyển link bị gán sai mùa sang đúng entry mùa của nó")
@@ -318,12 +379,14 @@ def main(argv=None) -> int:
                     help="slug bộ đang giữ link (dùng với --move-all)")
     ap.add_argument("--to", dest="to_slug", default="",
                     help="slug bộ đích (dùng với --move-all)")
+    ap.add_argument("--move-over", action="store_true",
+                    help="dời phần VƯỢT TỔNG của --from sang --to (đánh số lại)")
     ap.add_argument("--to-anilist", type=int, default=0,
                     help="id AniList của bộ đích (thay cho --to, khỏi phải đoán slug)")
     args = ap.parse_args(argv)
 
     DB = dbmod.DB()
-    if args.move_all:
+    if args.move_all or args.move_over:
         to_slug = args.to_slug
         if not to_slug and args.to_anilist:
             found = DB.select(
@@ -338,10 +401,10 @@ def main(argv=None) -> int:
             to_slug = found[0]["slug"]
             print(f"  · đích theo AniList {args.to_anilist}: {to_slug}")
         if not args.from_slug or not to_slug:
-            print("\n✗ --move-all cần --from <slug> và (--to <slug> "
-                  "hoặc --to-anilist <id>)")
+            print("\n✗ cần --from <slug> và (--to <slug> hoặc --to-anilist <id>)")
             return 2
-        n = move_all(DB, args.from_slug, to_slug, dry=not args.apply)
+        fn = move_all if args.move_all else move_over
+        n = fn(DB, args.from_slug, to_slug, dry=not args.apply)
         return 0 if n or not args.apply else 1
     print("\n▶ Chuyển link vượt tổng số tập sang mùa đúng")
     plans = plan(DB)
