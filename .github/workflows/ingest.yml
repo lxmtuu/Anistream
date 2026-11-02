@@ -9,6 +9,7 @@ on:
     - cron: "10 */6 * * *"   # Job C: video official (lệch 10' để không trùng A)
     - cron: "17 19 * * *"    # Job B: catalog (02:17 giờ VN)
     - cron: "40 20 * * *"    # Job D: TMDB — tên/tóm tắt tiếng Việt + tập (03:40 giờ VN)
+    - cron: "30 3 * * *"     # Job C: BACKFILL sâu toàn bộ kênh (10:30 giờ VN)
     #
     # ⚠️ GitHub TỰ TẮT scheduled workflow sau 60 ngày repo không có commit mới.
     # Run do cron tạo ra không tính là "hoạt động". Nếu app im lặng quá 2 tháng,
@@ -48,6 +49,13 @@ jobs:
             "10 */6 * * *") echo "cmd=youtube"   >> $GITHUB_OUTPUT ;;
             "17 19 * * *")  echo "cmd=catalog"   >> $GITHUB_OUTPUT ;;
             "40 20 * * *")  echo "cmd=tmdb"      >> $GITHUB_OUTPUT ;;
+            # Backfill sâu 1 lần/ngày. Cron 6h chỉ đọc RSS = 15 video mới nhất
+            # mỗi kênh nên KHÔNG BAO GIỜ lấy được lịch sử kênh. Đo 02/11/2026:
+            # 163 bộ / 2028 tập metadata nhưng chỉ 485 link ⇒ 94 bộ liệt kê
+            # tập mà không có video nào để xem. `--deep` dùng YouTube Data API
+            # lấy toàn bộ uploads (cache ghép tên giữ chi phí thấp).
+            "30 3 * * *")  echo "cmd=youtube"   >> $GITHUB_OUTPUT
+                           echo "extra=--deep --max-videos 2000" >> $GITHUB_OUTPUT ;;
             # Job E/F không có cron riêng: chạy kèm Job D hằng ngày (dưới đây)
             *)              echo "cmd=${{ github.event.inputs.command || 'all' }}" >> $GITHUB_OUTPUT ;;
           esac
@@ -61,7 +69,8 @@ jobs:
           YOUTUBE_CHANNELS:     ${{ vars.YOUTUBE_CHANNELS || 'muse_vn' }}
           # Không có TMDB_API_KEY → job D báo rõ rồi bỏ qua (xem main.py)
           INGEST_COMMAND:       ${{ steps.pick.outputs.cmd }}
-          INGEST_EXTRA:         ${{ github.event.inputs.extra || '' }}
+          # cron backfill sâu tự đặt cờ; bấm tay thì dùng `extra` của bạn.
+          INGEST_EXTRA:         ${{ steps.pick.outputs.extra }} ${{ github.event.inputs.extra }}
         run: |
           # `extra` cho phép bấm tay với cờ như --refresh; cron để trống.
           # Không dùng eval để tránh chèn lệnh — chỉ tách theo khoảng trắng.
@@ -84,8 +93,13 @@ jobs:
           python -m ingest.main tmdb --refresh --limit-tmdb 200
           python -m ingest.main seasons --limit-seasons 120
           python -m ingest.main episodes
+          # Job I: ẩn/hiện bộ theo NỘI DUNG thật. Trước đây chỉ chạy trong
+          # `all` nên cron này bỏ quên ⇒ bộ 0 tập/0 video (trang trắng) vẫn hiện.
+          python -m ingest.main publish
           # Job G: kiểm bất biến dữ liệu — vi phạm cứng thì ĐỎ, không im lặng.
           python -m ingest.main check
+          # Job J: độ phủ nội dung — in ra bao nhiêu bộ có video thật sự.
+          python -m ingest.main coverage
           # Job F chạy CUỐI: Jikan là nguồn DUY NHẤT có thể bị chặn (đo 02/11/2026
           # trên máy chủ dự án: api.jikan.moe timeout cả IPv4). Nếu để giữa chuỗi
           # thì `set -e` sẽ chặn luôn episodes/check phía sau — hỏng dây chuyền.
