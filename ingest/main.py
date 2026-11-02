@@ -169,6 +169,87 @@ def _link_rows(DB, videos, cache, verbose=True):
     return rows, links, unmatched, need_review
 
 
+def job_unmatched(DB, limit: int = 40) -> int:
+    """In tên series trong tiêu đề YouTube CHƯA ghép được với bộ nào.
+
+    Đọc từ bảng `ingest_unmatched` (job C ghi mỗi lần chạy) thay vì log terminal.
+    Trả về số tên đang có để người vận hành biết còn bao nhiêu việc.
+
+    Cách dùng: mở danh sách này → thêm tên vào `ingest/aliases.json` (map sang
+    AniList ID) → chạy lại job C. Tên nào là bộ KHÔNG có trên Muse VN thì cứ để
+    đó, không phải lỗi.
+    """
+    print("\n▶ Job C'' — tên video CHƯA ghép được (ingest_unmatched)")
+    if DB.dry:
+        print("  [dry-run] cần Supabase để đọc dữ liệu → bỏ qua")
+        return 0
+    rows = DB.select_all(
+        "ingest_unmatched",
+        "select=channel,series_name,kind,videos,first_seen_at,last_seen_at"
+        "&order=videos.desc")
+    if not rows:
+        print("  ✓ không có tên nào chưa khớp (hoặc job C chưa chạy lần nào "
+              "trên bản này)")
+        return 0
+    chua, vuot = [], []
+    for r in rows:
+        (vuot if r.get("kind") == "review" else chua).append(r)
+    print(f"  · {len(chua)} tên chưa khớp · {len(vuot)} tên vượt tổng số tập")
+    if chua:
+        print(f"  ⚠ {sum(r.get('videos') or 0 for r in chua)} video thuộc "
+              f"{len(chua)} series KHÔNG vào được DB (thiếu alias):")
+        for r in chua[:limit]:
+            print(f"      - {r.get('series_name')}  "
+                  f"({r.get('videos')} video, kênh {r.get('channel')})")
+        if len(chua) > limit:
+            print(f"      … còn {len(chua) - limit} tên nữa")
+    if vuot:
+        print(f"  ⚠ {len(vuot)} series ghép được nhưng số tập VƯỢT tổng "
+              f"(nghi sai bộ/mùa — KHÔNG ghi):")
+        for r in vuot[:limit]:
+            print(f"      - {r.get('series_name')}  ({r.get('videos')} video)")
+    return len(chua)
+
+
+def _luu_chua_khop(DB, channel: str, unmatched: Dict[str, int],
+                   review: Dict[str, int], run_at: str) -> int:
+    """Ghi danh sách tên CHƯA KHỚP vào bảng `ingest_unmatched` rồi dọn tên cũ.
+
+    Vì sao không chỉ `print`: danh sách này là **đầu vào duy nhất** để biết có
+    nên thêm alias hay không, mà log terminal thì mất (GitHub Actions xoá sau 90
+    ngày, shell trên máy thì tắt là hết). Đo 02/11/2026: 94 bộ có tập mà 0 video,
+    và không ai trả lời được "Muse VN không có bộ đó" hay "hỏng ghép tên" — chỉ
+    vì thông tin nằm trong log của một lần chạy đã trôi mất.
+
+    Trả về số dòng đã ghi. Không bao giờ ném: đây là chẩn đoán, hỏng nó KHÔNG
+    được làm hỏng việc ghi link (đã ghi xong trước khi gọi hàm này).
+    """
+    if DB.dry:
+        print(f"  [dry-run] sẽ ghi {len(unmatched) + len(review)} tên chưa khớp "
+              f"vào ingest_unmatched")
+        return 0
+    rows = [{"source": "youtube", "channel": channel, "series_name": name,
+             "kind": kind, "videos": cnt, "last_seen_at": run_at}
+            for kind, group in (("unmatched", unmatched), ("review", review))
+            for name, cnt in group.items()]
+    wrote = 0
+    try:
+        if rows:
+            DB.upsert("ingest_unmatched", rows,
+                      on_conflict="source,channel,series_name,kind",
+                      fallback_per_row=True)
+            wrote = len(rows)
+        # Dọn tên ĐÃ KHỚP ở lần chạy này (last_seen_at cũ hơn mốc bắt đầu chạy)
+        # → bảng luôn là ảnh chụp HIỆN TẠI, không phải lịch sử tích luỹ.
+        DB.delete("ingest_unmatched",
+                  {"channel": channel, "last_seen_at": f"lt.{run_at}"})
+    except Exception as e:                # noqa: BLE001 — chẩn đoán không được làm chết job
+        print(f"  ! không ghi được ingest_unmatched ({type(e).__name__}: "
+              f"{str(e)[:110]}) — link vẫn đã ghi xong")
+        return wrote
+    return wrote
+
+
 def job_youtube(DB, limit: int = 25, check_embed: bool = True,
                 deep: bool = False, max_per_channel: int = 5000,
                 use_cache: bool = True, only_channel: str = ""):
@@ -198,6 +279,7 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
 
     total_rows = total_links = 0
     all_unmatched, all_review = {}, {}
+    run_at = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     failures = []
 
     for n, ch in enumerate(channels, 1):
@@ -246,6 +328,12 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
         if use_cache:
             path = match.save_disk_cache(cache)
             print(f"  · đã lưu cache {len(cache)} tên → {path}")
+
+        # Ghi CHẨN ĐOÁN của riêng kênh này ngay (kênh sau lỗi không xoá mất).
+        n_diag = _luu_chua_khop(DB, ch["key"], unmatched, need_review, run_at)
+        if n_diag:
+            print(f"  · {n_diag} tên chưa khớp đã ghi vào ingest_unmatched "
+                  f"(kênh {ch['key']})")
 
     if all_unmatched:
         print(f"\n  ⚠ {len(all_unmatched)} tên series chưa khớp "
@@ -1374,7 +1462,7 @@ def main(argv=None):
     ap.add_argument("command", choices=["schedule", "catalog", "youtube", "tmdb",
                                         "seasons", "jikan", "episodes",
                                         "check", "add", "publish", "coverage",
-                                        "all"])
+                                        "unmatched", "all"])
     ap.add_argument("--hours", type=int, default=26)
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--limit", type=int, default=25, help="số video mỗi kênh")
@@ -1456,6 +1544,8 @@ def main(argv=None):
             total += job_publish(DB)
         if args.command == "coverage":
             total += job_coverage(DB)
+        if args.command == "unmatched":
+            total += job_unmatched(DB)
         if args.command == "check":
             total += job_check(DB, strict=not args.no_strict)
         if args.command == "all":
