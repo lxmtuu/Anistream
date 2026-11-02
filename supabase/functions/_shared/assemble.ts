@@ -240,3 +240,30 @@ export function shelf(title: string, kind: string, ids: (number | null | undefin
   }
   return { title, kind, ids: out };
 }
+
+/**
+ * Giữ lại các tập ĐÃ LÊN SÓNG trong `hours` giờ gần nhất — dùng cho shelf
+ * "Tập mới hôm nay".
+ *
+ * Vì sao phải lọc ở đây chứ không chỉ ở query: DB có **506 tập** (66 bộ) mang
+ * `airing_at` ở TƯƠNG LAI (đo 02/11/2026) — lịch phát của bộ đang chiếu được
+ * ghi trước. Query cũ `airing_at >= now - 6h` **không có cận trên**, và vì nó
+ * sắp xếp GIẢM DẦN nên 40 dòng đầu toàn là tập chưa chiếu (xa nhất lên đầu) ⇒
+ * shelf "Tập mới hôm nay" toàn tập của tuần sau.
+ *
+ * `airing_at` rỗng = không rõ lịch ⇒ coi như đã lên sóng (không giấu bộ đi).
+ */
+export function recentAired<T extends { airing_at?: string | null }>(
+  rows: T[],
+  now: Date = new Date(),
+  hours = 6,
+): T[] {
+  const tu = now.getTime() - hours * 3_600_000;
+  const den = now.getTime();
+  return rows.filter((r) => {
+    if (!r.airing_at) return true;
+    const t = Date.parse(r.airing_at);
+    if (Number.isNaN(t)) return true;
+    return t >= tu && t <= den;
+  });
+}

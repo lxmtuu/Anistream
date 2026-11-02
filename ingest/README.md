@@ -126,6 +126,20 @@ python3 -m ingest.main tmdb --force --limit-tmdb 200
 (`--force` bỏ hạn `tmdb_checked_at`; trước đây cả 163 bộ đều "vừa hỏi" nên bản
 vá này sẽ không có tác dụng cho tới khi hết hạn.)
 
+### View `anime_thieu_tap` — bỏ tập trùng ngày HỢP LỆ khỏi hàng đợi sửa
+
+Định nghĩa cũ coi "2 tập cùng NGÀY chiếu" là danh sách tập sai ⇒ 4 bộ bị job TMDB
+hỏi lại **mỗi ngày** dù dữ liệu đúng: `chitose-kun-wa-ramune-bin-no-naka`
+(13 tập / 12 ngày), `tensei-goblin-dakedo-shitsumon-aru` (tập 5–6 khác GIỜ),
+`yasei-no-last-boss-ga-arawareta-2nd`, `fool-night` (3 tập cùng ngày).
+
+Migration `db/migrations/20261102_fix_view_thieu_tap_trung_ngay.sql` dùng đúng
+ngưỡng của `qa.py`: **dư ≥ 3 dòng so với số NGÀY chiếu** và **số dòng ≠
+`episodes_total`**; "dư" chỉ tính trên các dòng CÓ `airing_at` (bộ thiếu ngày
+chiếu như `fairy-tail` 66/175 có `dư = 0`, đó là lỗ hổng khác).
+
+Kết quả trên DB thật: view **22 → 19 bộ**, cả 19 đều thật sự 0 tập.
+
 ### Job I — ẩn bộ KHÔNG có nội dung khỏi danh sách
 
 Sau khi dời 148 link của HUNTER×HUNTER sang bộ 2011, bộ 1999 còn lại **0 tập,

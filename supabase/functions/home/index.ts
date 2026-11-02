@@ -14,6 +14,7 @@ import {
   EpisodeRow,
   groupByAnime,
   LinkRow,
+  recentAired,
   shelf,
   toAnimeDto,
 } from "../_shared/assemble.ts";
@@ -38,6 +39,10 @@ Deno.serve(
         .from("episodes")
         .select("anime_id, number, airing_at")
         .gte("airing_at", recentIso)
+        // Cận TRÊN bắt buộc: không có nó thì 506 tập chưa chiếu (66 bộ) lọt vào
+        // shelf "Tập mới hôm nay", và vì sắp xếp giảm dần nên tập XA NHẤT lên
+        // đầu (đo 02/11/2026).
+        .lte("airing_at", nowIso)
         // giảm dần để 40 dòng là 40 tập MỚI nhất (tăng dần sẽ cắt mất tập mới)
         .order("airing_at", { ascending: false })
         .limit(40),
@@ -87,10 +92,11 @@ Deno.serve(
       if (res.error) throw new Error(`${name}: ${res.error.message}`);
     }
 
-    const recentRows = (recentEp.data ?? []) as Pick<
-      EpisodeRow,
-      "anime_id" | "number" | "airing_at"
-    >[];
+    // Lọc lần nữa ở code (rẻ) để chống lệch múi giờ/đồng hồ giữa DB và function.
+    const recentRows = recentAired(
+      (recentEp.data ?? []) as Pick<EpisodeRow, "anime_id" | "number" | "airing_at">[],
+      now,
+    );
     const scheduleRows = (schedRes.data ?? []) as {
       anime_id: number;
       number: number;
