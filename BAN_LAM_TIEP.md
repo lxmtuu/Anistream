@@ -202,6 +202,76 @@ select a.title_romaji, count(e.number) from anime a
 > Muốn job D chạy tự động hằng ngày: thêm `TMDB_API_KEY` vào GitHub secrets
 > (Settings → Secrets → Actions). Không có key thì job D tự bỏ qua kèm cảnh báo.
 
+### 02/11/2026 — Jikan không tới được từ máy bạn
+
+`api.jikan.moe` timeout (kể cả `curl -4`) trong khi TMDB vẫn hoạt động. Chẩn đoán
+bằng một lệnh, đừng đoán:
+
+```bash
+bash scripts/check_net.sh
+```
+
+Kết quả rơi vào 1 trong 3 nhóm (xem bảng trong `ingest/README.md` § Chẩn đoán
+mạng). Nếu host đó bị chặn thật thì **không phải lỗi code** — job F sẽ fail rõ
+ràng (exit ≠ 0) thay vì im lặng, và mọi job khác vẫn chạy.
+
+Thay thế nhanh khi Jikan bị chặn: **job D (TMDB) đã lấp được phần lớn tập** —
+đo 02/11: 19 bộ thiếu tập + 4 bộ 0 tập đều đã có `tmdb_id`:
+
+```bash
+python3 -m ingest.main tmdb --limit-tmdb 200
+python3 -m ingest.main tmdb --refresh --limit-tmdb 200
+```
+
+Hoặc chạy Jikan trên GitHub Actions (không qua mạng của bạn):
+
+```bash
+GH_TOKEN=xxx bash scripts/trigger_ingest.sh lxmtuu/Anistream jikan --fill-gaps
+```
+
+### Vá 02/11/2026 (tối) — vì sao 53 bộ vẫn 0 tập, và 92 link vẫn vượt tổng
+
+Đo trên DB thật (161 bộ): **72 bộ đủ tập · 53 bộ có tổng nhưng 0 tập ·
+17 bộ không biết tổng · 19 bộ thiếu một phần**. Truy ra **ba tầng** nguyên nhân,
+cả ba đều đã vá kèm test hồi quy:
+
+| Tầng | Lỗi | Bằng chứng |
+|---|---|---|
+| 1 | `season_from_title` không đọc dạng ngắn AniList dùng cho mùa sau | `One Punch Man 2`, `Mob Psycho 100 II`, `Karakai Jouzu no Takagi-san 2`, `Diamond no Ace act II: Second Season` → trước trả `None` |
+| 2 | `match_anime` lọc theo **năm** | AniList ghi năm của MÙA (`One Punch Man 2` = 2019), TMDB ghi năm MÙA 1 (= 2015) → lệch 4 > dung sai 2 → loại sạch ⇒ **25 bộ FINISHED chưa từng có `tmdb_id`** |
+| 3 | `pick_season` từ chối khi TMDB có id **riêng cho từng mùa** | 5 bộ FINISHED đã có `tmdb_id` mà vẫn 0 tập (vd 220542 = "Apothecary Diaries Season 2", chỉ có Season 1 / 24 tập) |
+
+Kiểm bằng Python trên máy: `match_anime({"title_romaji": "One Punch Man 2", "year": 2019})`
+→ trước `(None, 0.0)`, sau `(63926, 0.937)`. 17/53 bộ 0 tập nay đọc được mùa từ tên.
+
+**Việc bạn chạy (2–3 lần, mỗi lần ~2 phút):**
+
+```bash
+python3 -m ingest.main tmdb --limit-tmdb 200
+```
+
+Kỳ vọng: dòng `✓ tmdb/enrich ok <n>` với n > 0 ở lần đầu; các lần sau n giảm dần
+(đã no). Kiểm lại:
+
+```sql
+-- số bộ có tổng mà 0 tập (trước: 53)
+select count(*) from anime a where a.episodes_total > 0
+  and not exists (select 1 from episodes e where e.anime_id = a.id);
+```
+
+**92 link vượt tổng** còn lại chia 3 kiểu, chỉ 1 kiểu job tự sửa được:
+
+| Bộ | Link vượt | Kiểu | Cách xử lý |
+|---|---|---|---|
+| `shangri-la-frontier` | 2 (tập 26, 41 / tổng 25) | link thuộc **mùa sau** | `python3 -m ingest.reassign --apply` → chuyển sang `…-2nd-season`, số − 25 |
+| `seihantai-na-kimi-to-boku-2nd-season` | 1 (tập 24 / tổng 13) | entry **đã đúng mùa**, chỉ đánh số tiếp nối | cùng lệnh trên → dời số 24 → 12 (mùa 1 có 12 tập) |
+| `hunter-hunter` | 86 (tập 63–148 / tổng 62) | **SAI BỘ**: entry là HUNTER×HUNTER **1999** (MAL 136, 62 tập), video Muse là bản **2011** (148 tập) | job KHÔNG tự sửa. Cần thêm entry 2011 rồi chuyển 148 link sang. Kể cả 62 link "hợp lệ" hiện tại cũng đang phát tập của bản 2011 trên trang bản 1999 |
+| `uq-holder-mahou-sensei-negima-2` | 3 (tập 13–15 / tổng 12) | Muse đăng 15 video cho bộ 12 tập (2 special?) | chưa có entry để nhận → giữ nguyên, đã báo rõ trong `reassign` |
+
+`python3 -m ingest.main check` sau đó phải cho `link_vuot_tong` = **89** (còn
+hunter-hunter 86 + uq-holder 3), không phải 0 — 89 link này là dữ liệu SAI BỘ,
+không phải lỗi đánh số.
+
 ### Vá 02/11/2026 — 4 lỗi "âm thầm" làm mất dữ liệu
 
 Rà lại toàn bộ pipeline, tìm được 4 chỗ ghi/sửa dữ liệu SAI mà không chỗ nào báo lỗi:

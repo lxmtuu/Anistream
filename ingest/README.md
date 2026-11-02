@@ -58,7 +58,7 @@ Quy tắc **thà thiếu còn hơn sai**:
 Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API Key (v3)**.
 ⚠️ Không dùng "Read Access Token (v4)" — code gọi bằng `api_key`.
 
-## 9 job ingest
+## 10 job ingest
 
 | Job | Lệnh | Nguồn | Chạy |
 |---|---|---|---|
@@ -71,8 +71,74 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 | E | `seasons` | AniList `relations` → **mùa thiếu** (SEQUEL + PREQUEL) | hằng ngày |
 | F | `jikan` | Jikan/MAL → lấp tập còn thiếu (`--fill-gaps`: cả bộ thiếu vài tập) | hằng ngày |
 | G | `check` | **kiểm bất biến dữ liệu**, vi phạm cứng → job ĐỎ | hằng ngày |
+| H | `reassign` | chuyển link bị gán **sai mùa** sang đúng mùa | chạy tay |
 
-`all` = A + B + C + C' + D + D' + E + F + G.
+`all` = A + B + C + C' + D + D' + E + F + G. (`reassign` chạy tay — xem dưới.)
+
+### Job D: đọc MÙA từ tên bộ (`season_from_title`)
+
+AniList tách mỗi mùa thành entry riêng ("Kusuriya no Hitorigoto 2nd Season"), TMDB
+gộp cả series vào một id. `pick_season` cũ chỉ dựa **năm** hoặc **số tập** — với
+series mà các mùa giống nhau (12–13 tập) và năm lệch, nó trả `None` → **không lấy
+được tập nào**. Đo 02/11/2026: **30 bộ FINISHED đã chiếu xong mà 0 tập**
+(`one-punch-man-2`, `mob-psycho-100-ii`, `dandadan-2nd-season`, `ao-no-hako`,
+`kusuriya-no-hitorigoto-2nd-season`, …).
+
+Nay `tmdb.season_from_title()` đọc `2nd Season` / `Second Season` (viết bằng chữ)
+/ `Season 2` / `Mùa 2` từ
+`title_romaji`/`title_english`/`title_native` và truyền xuống `pick_season` như
+lựa chọn **đáng tin nhất**. Hai chốt an toàn:
+
+- **không** đọc `Part 2` — đó là phần trong cùng một mùa TMDB, không phải mùa mới;
+- tên ghi mùa N mà TMDB **không** có mùa N → trả `None` (không rơi xuống đoán mò,
+  tránh gán tập mùa 1 cho entry mùa 2) — **trừ** trường hợp TMDB có entry **riêng
+  cho từng mùa** (vd id 220542 = "Apothecary Diaries Season 2" chỉ có Season 1):
+  khi đó mùa duy nhất được nhận nếu số tập của nó lệch ≤ 2 so với AniList. Đo
+  02/11/2026: 5 bộ FINISHED đã có `tmdb_id` mà vẫn 0 tập vì thiếu luật này;
+- tên có `":"` thì **bỏ qua** phần số ở cuối — `Girls und Panzer: Saishuushou 5` là
+  phim lẻ phần 5, không phải mùa 5.
+
+Ngoài ra AniList hay dùng **dạng ngắn** cho mùa sau (`One Punch Man 2`,
+`Mob Psycho 100 II`, `Karakai Jouzu no Takagi-san 2`). Từ 02/11/2026
+`season_from_title` đọc cả số Ả Rập lẫn số La Mã ở **cuối tên**, chỉ nhận 2–9
+(số lớn hơn là số trong tên, ví dụ `Mob Psycho 100`).
+
+**Lọc năm trong `match_anime`** (cùng ngày): đây là tầng sâu hơn của cùng lỗi.
+AniList ghi **năm của mùa** (`One Punch Man 2` → 2019) còn TMDB ghi **năm mùa 1**
+(2015) → lệch 4 năm > `YEAR_TOLERANCE=2` ⇒ loại sạch kết quả ⇒ không có `tmdb_id`
+⇒ **25/53 bộ 0 tập chưa từng khớp được TMDB**. Nay nếu tên cho biết mùa ≥ 2 thì
+`match_anime` **bỏ lọc năm** (vẫn giữ ngưỡng tên 0.80), bộ không ghi mùa vẫn lọc
+năm như cũ.
+
+### Job H — `reassign`: link bị gán sai mùa
+
+Muse đánh số tập **tiếp nối qua các mùa**: FAIRY TAIL đăng liên tục tập 1–277,
+nhưng AniList tách "FAIRY TAIL" (175) và "FAIRY TAIL (2014)" (102). Ingest gán cả
+277 video vào entry mùa 1 → 102 link vượt tổng bị chốt chặn loại ⇒ **102 video
+không ai xem được** (mùa 1 hiện 66 tập trong khi Muse có 277).
+
+Có **hai** kiểu lệch, job xử lý cả hai:
+
+| kiểu | ví dụ thật (02/11/2026) | cách sửa |
+|---|---|---|
+| link thuộc **mùa sau** | `shangri-la-frontier` giữ tập 26, 41 (bộ chỉ 25) | chuyển sang `shangri-la-frontier-2nd-season`, số − 25 |
+| số tập **tiếp nối nhưng entry đã đúng mùa** | `seihantai-na-kimi-to-boku-2nd-season` (13 tập) giữ tập 24 | dời số **trong cùng entry**: 24 − 12 = 12 |
+
+Luật dời số chỉ chạy khi tìm được entry mùa trước **theo slug** (`…-2nd-season`
+→ `…`), mọi số sau khi dời nằm trong `[1, episodes_total]`, và **không trùng** số
+tập đang có (trùng = bộ bị khai thiếu tổng, không phải đánh số tiếp nối → bỏ).
+
+```bash
+python3 -m ingest.reassign                 # chỉ in kế hoạch
+python3 -m ingest.reassign --apply --only-exact   # an toàn nhất
+python3 -m ingest.reassign --apply         # gồm cả ca "probable"
+```
+
+Quy tắc rất bảo thủ: offset = `episodes_total` của bộ cũ; đích phải là mùa sau
+theo slug và **chưa có link/tập nào**; mọi link phải ánh xạ vào `[1, tổng của
+đích]`; `exact` khi dãy số liên tục và khớp đúng tổng của đích. Ca không có entry
+mùa sau (HUNTER×HUNTER 63–148, DB chỉ có bản 62 tập) thì **để nguyên và báo**, còn
+hơn gán bừa sang bộ khác.
 
 ### Vì sao cần D' và E (2 lỗi cũ)
 
@@ -172,6 +238,31 @@ curl -4 -sS -m 20 -o /dev/null -w '%{http_code}\n' https://api.jikan.moe/v4/anim
 ```
 
 `200` → mạng ổn. `000` → ISP/proxy chặn: đặt `HTTPS_PROXY=http://host:port` trong `.env`.
+
+### Chẩn đoán mạng: `bash scripts/check_net.sh`
+
+Khi một job cứ `ConnectTimeout` mà job khác vẫn chạy được (ca thật 02/11/2026:
+Jikan chết 39/39 nhưng TMDB vẫn lấy được 63/126 `tmdb_id`), đừng đoán. Script đo
+từng tầng rồi in kết luận:
+
+```
+── DNS ──
+  Jikan/MAL (job F)   ✓ 135.181.39.91
+── Kết nối HTTPS (IPv4 / IPv6) ──
+  Jikan/MAL (job F)   ❌ v4=000  v6=000 → KHÔNG kết nối được (firewall/ISP)
+  TMDB (job D)        ⚠ v4=401 (OK)  v6=000 → CHỈ IPv6 lỗi
+```
+
+Đọc kết quả:
+- **DNS trống** → DNS nhà mạng chặn: đổi sang `1.1.1.1` / `8.8.8.8`, hoặc
+  `nslookup api.jikan.moe 1.1.1.1` để xác nhận.
+- **`v4` OK, `v6` 000** → chỉ IPv6 hỏng: `ingest/net.py` tự ép IPv4, không cần làm gì.
+- **`v4` và `v6` đều 000** → firewall/ISP chặn host đó. Ba cách: thêm
+  `HTTPS_PROXY=http://host:port` vào `.env` · chạy job trên GitHub Actions ·
+  dùng nguồn khác cho job đó.
+
+Lưu ý: `401`, `404`, `4xx` đều là **đã tới được server** — script chỉ coi `000`
+là chặn. Vì vậy `curl` thiếu API key vẫn được tính là OK.
 
 ### Cron: GitHub không đủ tin cậy
 

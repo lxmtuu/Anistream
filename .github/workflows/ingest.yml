@@ -83,8 +83,12 @@ jobs:
           python -m ingest.main tmdb --limit-tmdb 200
           python -m ingest.main tmdb --refresh --limit-tmdb 200
           python -m ingest.main seasons --limit-seasons 120
-          python -m ingest.main jikan --limit-jikan 60
           python -m ingest.main episodes
           # Job G: kiểm bất biến dữ liệu — vi phạm cứng thì ĐỎ, không im lặng.
           python -m ingest.main check
+          # Job F chạy CUỐI: Jikan là nguồn DUY NHẤT có thể bị chặn (đo 02/11/2026
+          # trên máy chủ dự án: api.jikan.moe timeout cả IPv4). Nếu để giữa chuỗi
+          # thì `set -e` sẽ chặn luôn episodes/check phía sau — hỏng dây chuyền.
+          # Đặt cuối: hỏng Jikan vẫn làm run ĐỎ (đúng), nhưng mọi job khác đã xong.
+          python -m ingest.main jikan --fill-gaps --limit-jikan 60
 

@@ -329,3 +329,114 @@ class TestCleanEpisodeTitle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestSeasonFromTitle(unittest.TestCase):
+    """30 bộ đã chiếu xong mà 0 tập (đo 02/11/2026) vì pick_season bó tay trước
+    các mùa giống nhau (12–13 tập/mùa). Nay đọc số mùa ngay từ tên bộ."""
+
+    def test_doc_so_mua_tu_ten(self):
+        cases = {
+            "Kusuriya no Hitorigoto 2nd Season": 2,
+            "Ao no Hako Season 2": 2,
+            "Tensei Shitara Ken Deshita 2nd Season": 2,
+            "Kusuriya no Hitorigoto 3rd Season": 3,
+            # HỒI QUY 02/11/2026: tên dạng ngắn "… 2" CHÍNH LÀ mùa 2. Trước đây
+            # trả None ⇒ job D không chọn được mùa ⇒ bộ 0 tập dù TMDB có đủ.
+            "Karakai Jouzu no Takagi-san 2": 2,
+            "PetitCure: Precure Fairies Season 4": 4,
+            "Bộ phim - Mùa 2": 2,
+            # HỒI QUY 02/11/2026: "Second Season" viết bằng CHỮ (Diamond no Ace
+            # act II: Second Season) trước đây không khớp regex nào → None.
+            "Diamond no Ace act II: Second Season": 2,
+            "Some Show Third Season": 3,
+        }
+        for title, want in cases.items():
+            self.assertEqual(tmdb.season_from_title(title), want, title)
+
+    def test_khong_doc_Part_2_vi_do_la_cour_trong_cung_mua(self):
+        self.assertIsNone(tmdb.season_from_title("Chitose-kun wa Ramune Bin no Naka Part 2"))
+        self.assertIsNone(tmdb.season_from_title("Mahou no Shimai LuluttoLilly Part 2"))
+
+    def test_ten_khong_co_mua(self):
+        self.assertIsNone(tmdb.season_from_title("FAIRY TAIL", "Fairy Tail"))
+        self.assertIsNone(tmdb.season_from_title(None, ""))
+
+    def test_thu_nhieu_ten_lay_cai_dau_tien_co(self):
+        self.assertEqual(
+            tmdb.season_from_title(None, "Some Anime 2nd Season", "Mùa 3"), 2)
+
+
+class TestPickSeasonTheoTen(unittest.TestCase):
+    def setUp(self):
+        self.D = {"seasons": [
+            {"season_number": 1, "episode_count": 24, "air_date": "2023-10-01"},
+            {"season_number": 2, "episode_count": 24, "air_date": "2025-01-10"},
+        ]}
+
+    def test_goi_y_mua_thang_duoc_so_tap_va_nam(self):
+        """Hai mùa đều 24 tập, năm lại lệch → trước đây trả None."""
+        self.assertEqual(tmdb.pick_season(self.D, 2025, 24)[0], 2)   # nhờ năm
+        self.assertEqual(tmdb.pick_season(self.D, None, 24)[0], None)  # mù mờ
+        so, why = tmdb.pick_season(self.D, None, 24, season_hint=2)
+        self.assertEqual(so, 2)
+        self.assertIn("theo tên", why)
+
+    def test_goi_y_khong_co_mua_do_thi_TRA_NONE(self):
+        """Tên ghi mùa 5 nhưng TMDB chỉ có 1–2 → không được đoán sang mùa khác."""
+        so, why = tmdb.pick_season(self.D, 2025, 24, season_hint=5)
+        self.assertIsNone(so)
+        self.assertIn("mùa 5", why)
+
+
+class TestMuaTuTenDangNgan(unittest.TestCase):
+    """AniList hay dùng dạng ngắn cho mùa 2/3 — trước đây không đọc được.
+
+    Đo 02/11/2026: "One Punch Man 2", "Mob Psycho 100 II", "Karakai Jouzu no
+    Takagi-san 2" đều trả None ⇒ job D không biết chọn mùa nào ⇒ 0 tập.
+    """
+
+    def test_so_o_cuoi(self):
+        self.assertEqual(tmdb.season_from_title("One Punch Man 2"), 2)
+        self.assertEqual(tmdb.season_from_title("Karakai Jouzu no Takagi-san 2"), 2)
+
+    def test_so_la_ma(self):
+        self.assertEqual(tmdb.season_from_title("Mob Psycho 100 II"), 2)
+        self.assertEqual(tmdb.season_from_title("Some Show III"), 3)
+
+    def test_so_lon_khong_phai_mua(self):
+        """"Mob Psycho 100" là số 100 trong TÊN, không phải mùa 100."""
+        self.assertIsNone(tmdb.season_from_title("Mob Psycho 100"))
+        self.assertIsNone(tmdb.season_from_title("Ranma 1/2"))
+
+    def test_khong_doan_khi_co_dau_hai_cham(self):
+        """"Girls und Panzer: Saishuushou 5" là phần 5 của phim, không phải mùa TV."""
+        self.assertIsNone(tmdb.season_from_title("Girls und Panzer: Saishuushou 5"))
+
+    def test_van_doc_dung_dang_day_du(self):
+        self.assertEqual(tmdb.season_from_title("Dandadan 2nd Season"), 2)
+        self.assertEqual(tmdb.season_from_title("Kusuriya no Hitorigoto 3rd Season"), 3)
+
+
+class TestEntryRiengCuaTungMua(unittest.TestCase):
+    """TMDB có entry RIÊNG cho mỗi mùa (id 220542 = "Apothecary Diaries Season 2").
+
+    Đo 02/11/2026: 5 bộ FINISHED đã có `tmdb_id` nhưng vẫn 0 tập — vì
+    `season_from_title` đòi mùa 2, còn entry đó chỉ có Season 1 (24 tập), nên
+    `pick_season` từ chối. Thực tế phải dùng chính Season 1 của entry đó.
+    """
+
+    D = {"seasons": [{"season_number": 1, "episode_count": 24,
+                      "air_date": "2025-01-10"}]}
+
+    def test_nhan_khi_so_tap_khop(self):
+        so, why = tmdb.pick_season(self.D, 2025, 24, season_hint=2)
+        self.assertEqual(so, 1, why)
+
+    def test_van_tu_choi_khi_so_tap_lech_xa(self):
+        """Entry 24 tập không thể là entry 12 tập của mùa khác."""
+        so, why = tmdb.pick_season(self.D, 2025, 12, season_hint=2)
+        self.assertIsNone(so, why)
+
+    def test_khong_co_so_tap_thi_khong_doan(self):
+        so, _ = tmdb.pick_season(self.D, None, None, season_hint=2)
+        self.assertIsNone(so)
