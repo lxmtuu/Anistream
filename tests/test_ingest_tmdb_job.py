@@ -877,3 +877,19 @@ class TestGhepMuaTrongJob(unittest.TestCase):
         self.assertEqual(len(ups), 1)
         self.assertEqual([r["number"] for r in ups[0][1]], [1, 2, 3, 4])
         self.assertIn("ghép 2 mùa", out)
+
+    def test_bo_da_co_mot_phan_tap_van_ghep_du(self):
+        """Đúng ca `fairy-tail` 02/11/2026: 2/4 tập ⇒ phải ghép mùa và lấp đủ.
+
+        Bản trước chỉ ghép khi bảng episodes TRỐNG (`not have`), nên bộ đã có
+        một phần tập thì đường ghép mùa KHÔNG BAO GIỜ được chạy — chạy
+        `tmdb --only-slug fairy-tail --force` trả về "0 anime được bổ sung".
+        """
+        db = FakeDB([dict(ROW, episodes_total=4)],
+                    existing_episodes={5: [{"number": 1, "airing_at": "2023-10-01"},
+                                           {"number": 2, "airing_at": "2023-10-08"}]})
+        meta = {1: {"episode_count": 2}, 2: {"episode_count": 2}}
+        n, out = TestJobTmdb()._run(db, seasons=(1, 2), total=4, meta=meta)
+        ups = [u for u in db.upserted if u[0] == "episodes"]
+        self.assertEqual(len(ups), 1, "2/4 tập ⇒ vẫn phải ghép mùa")
+        self.assertEqual([r["number"] for r in ups[0][1]], [1, 2, 3, 4])
