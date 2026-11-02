@@ -377,5 +377,81 @@ def choose_entry(
     return best, f"khớp tên {score(best):.2f}"
 
 
+def search_candidates(name: str, per_page: int = 10) -> List[Dict]:
+    """Ứng viên AniList cho 1 tên: thử nguyên tên, rồi giản thể, rồi rút gọn.
+
+    Khác `resolve`: trả về CẢ danh sách để `choose_entry` còn xét mùa/số tập.
+    """
+    out: List[Dict] = []
+    seen = set()
+    variants = [name]
+    if has_cjk(name):
+        variants.append(simplify(name))
+    variants.extend(_short_variants(name))
+    for v in variants:
+        if not alias_key(v):
+            continue
+        for m in anilist.search_media(v, per_page=per_page) or []:
+            mid = m.get("id")
+            if mid in seen:
+                continue
+            seen.add(mid)
+            out.append(m)
+        if out:
+            break
+    return out
+
+
+def resolve_series(name: str, season: Optional[int] = None, max_episode: int = 0,
+                   year_hint: Optional[int] = None, cache: Optional[Dict] = None,
+                   min_score: float = 0.0) -> Tuple[Optional[Dict], float, str]:
+    """Ghép MỘT series của Muse VN → đúng entry AniList (bộ + mùa).
+
+    Đây là đường ghép ĐÚNG cho job C. `choose_entry` xét mùa ("S3"/"Mùa 2"),
+    xét tổng số tập (loại entry 62 tập khi video là tập 148) và xét năm — nhưng
+    từ 02/11/2026 nó **không được gọi ở đâu cả** (chỉ có test): job C vẫn dùng
+    `resolve` → `pick_best`, tức chỉ so tên mờ rồi lấy bộ giống nhất. Hệ quả đo
+    được: "Đại chiến người Khổng Lồ S3", "Thất hình đại tội S2", "One-Punch Man
+    S3" không vào được DB dù AniList có đủ entry.
+
+    `cache` (dict trên đĩa) chỉ lưu kết quả CUỐI cho tên gốc, dùng khoá riêng
+    để không lẫn với `resolve`.
+    """
+    key = alias_key(name)
+    if not key:
+        return None, 0.0, "—"
+
+    def _done(media: Optional[Dict], score: float, why: str):
+        return media, score, why
+
+    # 0) cache trên đĩa: tên đã ghép ở lần chạy trước → chỉ còn kiểm mùa/tập
+    if cache is not None and isinstance(cache.get(key), dict):
+        best, why = choose_entry([cache[key]], name, season, max_episode, year_hint)
+        if best:
+            return _done(best, 1.0, f"cache · {why}")
+
+    # 1) alias biên tập: chính xác 100%, vẫn phải kiểm mùa/tập
+    if key in _ALIASES:
+        m = _media_by_id(_ALIASES[key])
+        if m:
+            best, why = choose_entry([m], name, season, max_episode, year_hint)
+            if best:
+                return _done(best, 1.0, f"alias · {why}")
+
+    cands = search_candidates(name)
+    best, why = choose_entry(cands, name, season, max_episode, year_hint)
+    if not best:
+        return _done(None, 0.0, why)
+    if cache is not None:
+        cache[key] = best          # lần sau chỉ cần kiểm mùa/tập, không search lại
+
+    score = max((similarity(name, t) for t in _titles(best)), default=0.0)
+    if score < min_score:
+        # Tên đến từ MÔ TẢ video (không phải tiêu đề) → đòi hỏi chặt hơn, tránh
+        # gán bừa một câu văn trong mô tả vào một bộ nào đó.
+        return _done(None, score, f"điểm {score:.2f} < {min_score:.2f}")
+    return _done(best, score, why)
+
+
 def rank_candidates(name: str, candidates: List[Dict]) -> List[Tuple[Dict, float]]:
     return sorted(((c, score_media(name, c)) for c in candidates), key=lambda x: -x[1])
