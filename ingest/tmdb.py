@@ -626,6 +626,86 @@ def season_first_year(season: Dict[str, Any]) -> Optional[int]:
     return min(years) if years else None
 
 
+def seasons_span(
+    detail: Dict[str, Any],
+    start_season: Optional[int],
+    episodes_total: Optional[int],
+) -> List[int]:
+    """Các mùa TMDB LIÊN TIẾP cộng lại ĐÚNG BẰNG số tập của entry AniList.
+
+    Vì sao cần (đo 02/11/2026): TMDB tách MỘT entry AniList thành NHIỀU mùa —
+    `fairy-tail`: AniList 175 tập, TMDB 46261 mùa 1 chỉ 48 tập (2009–2010), các
+    mùa sau chứa phần còn lại. `pick_season` không mùa nào bằng 175 nên job chỉ
+    ghi được 48 tập rồi thôi; 127 tập còn lại không bao giờ vào.
+
+    An toàn:
+      · tổng phải bằng CHÍNH XÁC `episodes_total` (lệch 1 tập là trả rỗng);
+      · phải từ 2 mùa trở lên — 1 mùa thì việc chọn mùa đã lo, không cần ghép;
+      · mùa 0 (special) bị bỏ qua.
+    """
+    total = int(episodes_total) if isinstance(episodes_total, int) else 0
+    if total <= 0:
+        return []
+    counts: Dict[int, int] = {}
+    for s in detail.get("seasons") or []:
+        no = s.get("season_number")
+        n = s.get("episode_count")
+        if isinstance(no, int) and no > 0 and isinstance(n, int) and n > 0:
+            counts[no] = n
+    if not counts:
+        return []
+    start = start_season if start_season in counts else min(counts)
+    span: List[int] = []
+    acc = 0
+    no = start
+    while acc < total and no in counts:
+        span.append(no)
+        acc += counts[no]
+        no += 1
+    if acc != total or len(span) < 2:
+        return []
+    return span
+
+
+def concat_seasons_rows(
+    anime_id: int,
+    seasons: List[Dict[str, Any]],
+    episodes_total: int,
+) -> List[Dict[str, Any]]:
+    """Ghép nhiều mùa TMDB thành dãy tập 1..N cho MỘT entry AniList.
+
+    Đánh số lại liên tục theo thứ tự mùa → trong mùa theo `episode_number`.
+    Chỉ trả dữ liệu khi số tập khớp ĐÚNG `episodes_total` (không cắt bừa).
+    """
+    total = int(episodes_total)
+    picked: List[Dict[str, Any]] = []
+    for season in seasons:
+        eps = [e for e in (season.get("episodes") or [])
+               if isinstance(e.get("episode_number"), int)]
+        eps.sort(key=lambda e: e["episode_number"])
+        picked.extend(eps)
+        if len(picked) > total:
+            return []               # nhiều hơn tổng ⇒ ghép sai, không ghi
+    if len(picked) != total:
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for new_num, e in enumerate(picked, 1):
+        row: Dict[str, Any] = {"anime_id": anime_id, "number": new_num}
+        air = (e.get("air_date") or "")[:10]
+        if air:
+            try:
+                row["airing_at"] = dt.datetime.fromisoformat(air).replace(
+                    tzinfo=dt.timezone.utc).isoformat()
+            except ValueError:
+                pass
+        title = clean_episode_title(e.get("name"))
+        if title:
+            row["title"] = title
+        out.append(row)
+    return out
+
+
 def episode_rows(
     anime_id: int,
     season: Dict[str, Any],
