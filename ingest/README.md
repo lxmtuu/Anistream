@@ -153,6 +153,18 @@ Nay `tmdb.split_season_offset()` xử lý: TMDB chỉ có 1 mùa **và** số t�
 Kèm theo: bộ nào không xác định được mùa thì **luôn** được liệt kê (trước đây chỉ
 báo khi TMDB có nhiều hơn 1 mùa — đó là lý do ca DAN DA DAN không xuất hiện ở đâu).
 
+### Job D — thử ỨNG VIÊN KẾ TIẾP khi TMDB trả nhiều series (02/11/2026)
+
+`python3 -m ingest.tmdb --slug kusuriya-no-hitorigoto-2nd-season` in ra **hai**
+series cùng khớp: `220542 'Dược Sư Tự Sự'` và `333686 '薬屋のひとりごと'`. Job cũ chỉ
+thử kết quả điểm cao nhất (220542, chỉ có mùa 1) → không chọn được mùa 2 → bộ **0
+tập** dù ứng viên kia có thể có mùa 2.
+
+Nay `tmdb.pick_all()` trả **nhiều** ứng viên đạt ngưỡng (khử trùng theo id, điểm
+giảm dần) và `match_anime(row, accept=…)` gọi `accept(ứng_viên)` để biết ứng viên
+đó có mùa cần tìm hay không; tối đa 3 ứng viên mỗi chuỗi tìm. Job truyền
+`season_for()` (pick_season → split_season_offset) làm `accept`.
+
 ### Job D — soi một bộ: `python3 -m ingest.tmdb`
 
 Khi log ghi "không tìm được trên TMDB" mà bạn tin là TMDB có, chạy:
