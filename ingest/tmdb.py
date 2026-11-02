@@ -408,6 +408,79 @@ def split_season_offset(
             "count": count}
 
 
+def merged_year_candidate(
+    detail: Dict[str, Any],
+    season_hint: Optional[int],
+    year: Optional[int],
+    episodes_total: Optional[int],
+) -> Optional[int]:
+    """TMDB dồn nhiều mùa vào 1 season → mùa TMDB nào cần xét theo NĂM.
+
+    Ca thật 02/11/2026: `kusuriya-no-hitorigoto-2nd-season` (AniList mùa 2, 24
+    tập, năm 2025) → TMDB 220542 có **một** mùa **60 tập** (mùa 1+2+3 dồn lại).
+    `split_season_offset` đòi 60 ≈ 2×24 (lệch ≤2) nên trượt; nhưng tập của mùa 2
+    **nằm trong đó**, phân biệt được bằng NGÀY CHIẾU.
+
+    Trả số mùa TMDB cần đọc, hoặc None. Chỉ nhận khi:
+      · tên bộ ghi mùa ≥ 2 (nếu không thì mùa 1 đã đủ);
+      · TMDB chỉ có ĐÚNG MỘT mùa;
+      · số tập của mùa đó **nhiều hơn hẳn** tổng của AniList (dồn nhiều mùa).
+    Việc tách theo năm do `episode_rows_by_year` làm và tự kiểm số lượng.
+    """
+    if not isinstance(season_hint, int) or season_hint < 2:
+        return None
+    if not year or not isinstance(episodes_total, int) or episodes_total <= 0:
+        return None
+    seasons = season_candidates(detail)
+    if len(seasons) != 1:
+        return None
+    count = seasons[0].get("count")
+    if not isinstance(count, int) or count <= episodes_total:
+        return None                      # không nhiều hơn → không phải ca dồn mùa
+    return seasons[0]["number"]
+
+
+def episode_rows_by_year(
+    anime_id: int,
+    season: Dict[str, Any],
+    year: int,
+    episodes_total: int,
+    tolerance: int = 2,
+) -> List[Dict[str, Any]]:
+    """Lấy các tập có NGÀY CHIẾU thuộc `year`, rồi đánh số lại 1..N.
+
+    Dùng cho ca TMDB dồn nhiều mùa vào 1 season. An toàn vì:
+      · số tập tìm được phải ≈ `episodes_total` (lệch ≤ `tolerance`), nếu không
+        trả rỗng — mùa vắt qua 2 năm (12 tập năm trước + 12 tập năm sau) sẽ bị
+        loại thay vì ghép bừa;
+      · chỉ cắt theo đúng năm, không đoán thứ tự khác.
+    """
+    picked = []
+    for e in season.get("episodes") or []:
+        num = e.get("episode_number")
+        air = e.get("air_date") or ""
+        if not isinstance(num, int) or num <= 0 or not air[:4].isdigit():
+            continue
+        if int(air[:4]) == int(year):
+            picked.append(e)
+    if abs(len(picked) - int(episodes_total)) > tolerance:
+        return []
+    picked.sort(key=lambda e: e["episode_number"])
+    out = []
+    for new_num, e in enumerate(picked, 1):
+        row = {
+            "anime_id": anime_id,
+            "number": new_num,
+            "airing_at": dt.datetime.fromisoformat(e["air_date"]).replace(
+                tzinfo=dt.timezone.utc).isoformat(),
+        }
+        title = clean_episode_title(e.get("name"))
+        if title:
+            row["title"] = title
+        out.append(row)
+    return out
+
+
 def episode_rows(
     anime_id: int,
     season: Dict[str, Any],
@@ -785,6 +858,12 @@ def explain(row: Dict[str, Any], limit: int = 5) -> int:
                 sp = split_season_offset(det, hint, row.get("episodes_total"))
                 if sp:
                     no, extra = sp["season"], f" · gộp mùa, trừ {sp['offset']} tập"
+            if no is None:
+                yno = merged_year_candidate(det, hint, row.get("year"),
+                                            row.get("episodes_total"))
+                if yno is not None:
+                    no, extra = yno, (f" · dồn mùa, tách theo năm "
+                                      f"{row.get('year')}")
             if no is None:
                 print(f"        ✗ TỪ CHỐI: {why}")
             else:

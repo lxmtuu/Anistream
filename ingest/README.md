@@ -165,6 +165,29 @@ giảm dần) và `match_anime(row, accept=…)` gọi `accept(ứng_viên)` đ�
 đó có mùa cần tìm hay không; tối đa 3 ứng viên mỗi chuỗi tìm. Job truyền
 `season_for()` (pick_season → split_season_offset) làm `accept`.
 
+### Job D — TMDB dồn nhiều mùa vào 1 season: tách theo NĂM (02/11/2026)
+
+`python3 -m ingest.tmdb --slug kusuriya-no-hitorigoto-2nd-season` in ra:
+
+```
+    ✓ 0.800  220542  'Dược Sư Tự Sự' (2023-10-22)
+        ↳ mùa 1: 60 tập (2023-10-22)
+        ✗ TỪ CHỐI: tên ghi mùa 2 nhưng TMDB chỉ có mùa 1
+```
+
+TMDB **dồn mùa 1 (24) + mùa 2 (24) + mùa 3 (12) = 60 tập** vào một season. Luật
+`split_season_offset` đòi `60 ≈ 2 × 24` (lệch ≤ 2) nên trượt.
+
+Nay có luật thứ ba, dùng **ngày chiếu** thay vì số học:
+
+1. `tmdb.merged_year_candidate(detail, hint, year, total)` — chỉ khi tên ghi mùa
+   ≥ 2, TMDB **đúng một** mùa, và số tập của nó **nhiều hơn hẳn** `total`.
+2. `tmdb.episode_rows_by_year(…, year, total)` — lấy các tập có năm chiếu **đúng
+   năm của entry AniList**, đánh số lại `1..N`; số tập phải ≈ `total` (lệch ≤ 2),
+   nếu không trả rỗng (mùa vắt qua 2 năm 12+12 sẽ bị loại thay vì ghép bừa).
+
+`explain` cũng đi qua luật này nên chẩn đoán và job luôn khớp nhau.
+
 ### Job D — không quét lại bộ vừa hỏi TMDB (02/11/2026)
 
 Một lần chạy quét đủ **161 bộ trong 792 giây** và ghi được **0 bản ghi**. Nguyên
