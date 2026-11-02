@@ -466,12 +466,26 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                     season = tmdb.fetch_season(best["id"], season_no)
                     n_season = len([e for e in (season.get("episodes") or [])
                                     if isinstance(e.get("episode_number"), int)])
-                    if not tmdb.episodes_plausible(row.get("episodes_total"), n_season):
-                        implausible.append(
-                            f"{label}  (TMDB {n_season} tập > AniList "
-                            f"{row.get('episodes_total')})")
-                    else:
-                        eps = tmdb.episode_rows(row["id"], season, matched)
+                    plausible = tmdb.episodes_plausible(
+                        row.get("episodes_total"), n_season)
+                    max_number = None
+                    if not plausible:
+                        # TMDB gộp nhiều mùa/nhiều cour vào MỘT mùa → nhiều tập hơn
+                        # AniList. Nếu ĐÂY là mùa đầu thì tập 1..N vẫn đúng, cắt
+                        # phần dư (9 bộ rơi vào cảnh này ngày 02/11/2026).
+                        max_number = tmdb.first_season_cut(
+                            detail, season_no, hint_season, row.get("year"),
+                            row.get("episodes_total"), season_count=n_season)
+                        if not max_number:
+                            implausible.append(
+                                f"{label}  (TMDB {n_season} tập > AniList "
+                                f"{row.get('episodes_total')})")
+                    if plausible or max_number:
+                        if max_number:
+                            print(f"      · TMDB có {n_season} tập, cắt còn "
+                                  f"{max_number} (mùa đầu của series)")
+                        eps = tmdb.episode_rows(row["id"], season, matched,
+                                                max_number=max_number)
                         if eps:
                             DB.upsert("episodes", eps, on_conflict="anime_id,number")
                             eps_written += len(eps)
