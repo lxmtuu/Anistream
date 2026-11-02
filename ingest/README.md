@@ -893,6 +893,23 @@ Tên tiếng Trung không search được trên AniList → thêm vào `aliases.
 Đây là **phần biên tập tạo giá trị riêng** của app (không đối thủ nào có danh mục này bằng tiếng Việt).
 Mẹo tìm ID: `python3 -m ingest.main` chỉ log tên, tìm trên https://anilist.co rồi lấy số trong URL.
 
+## Lỗi console Windows: `UnicodeEncodeError: 'charmap'` (03/11/2026)
+
+Chạy trên Git Bash (Windows) mà **ống ra** (pipe) là job chết ngay dòng tiêu đề:
+
+```
+python3 -m ingest.main youtube --deep --max-videos 5000 2>&1 | tee youtube.log
+UnicodeEncodeError: 'charmap' codec can't encode character '\u1eac' ...
+```
+
+Vì stdout là pipe (không phải console) nên Python dùng bảng mã ANSI của Windows
+(cp1252/cp437); chữ Việt có dấu nặng trong tiêu đề job (`GHI THẬT`) không có trong
+bảng đó. Nay `main()` gọi `_utf8_stdout()` trước mọi `print`: ép UTF-8 +
+`errors="replace"` (thà hiện `?` còn hơn chết cả lần ingest; dữ liệu ghi DB không
+đi qua stdout nên không bị ảnh hưởng). Test: `tests/test_utf8_console.py`.
+
+Cách né nhanh nếu chưa cập nhật code: `PYTHONIOENCODING=utf-8 python3 -m ingest.main …`
+
 ## Cấu trúc
 
 ```

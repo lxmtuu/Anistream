@@ -893,6 +893,15 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                         eps = tmdb.episode_rows(
                             row["id"], season, matched, max_number=max_number,
                             offset=(split or {}).get("offset", 0))
+                        if not eps:
+                            # Đường ghi CUỐI CÙNG mà trả rỗng ⇒ nói ra. Im lặng
+                            # chính là kiểu lỗi làm `fairy-tail` báo "0 anime
+                            # được bổ sung" mà không ai biết vì sao (02/11/2026).
+                            print(f"      · không tạo được tập nào cho "
+                                  f"{row.get('slug')} (mùa {season_no}: "
+                                  f"TMDB {n_season} tập, AniList "
+                                  f"{row.get('episodes_total') or '?'} tập, "
+                                  f"cần {len(existing)}→{row.get('episodes_total') or '?'})")
                         if eps:
                             DB.upsert("episodes", eps, on_conflict="anime_id,number")
                             eps_written += len(eps)
@@ -1337,7 +1346,30 @@ def job_check(DB, strict: bool = True):
 
 
 # ─────────────────────────────────────────────── CLI
+def _utf8_stdout() -> None:
+    """Ép stdout/stderr về UTF-8 để không chết vì console Windows.
+
+    Lỗi thật (03/11/2026, Git Bash trên Windows): `python3 -m ingest.main youtube
+    ... | tee youtube.log` → `UnicodeEncodeError: 'charmap' codec can't encode
+    character '\u1eac'`. Khi stdout là ĐƯỜNG ỐNG (pipe) chứ không phải console,
+    Python dùng bảng mã ANSI của Windows (cp1252/cp437) và chữ Việt có dấu nặng
+    (`Ậ`, `ệ`, `ộ`) không nằm trong bảng đó → job CHẾT ngay dòng tiêu đề, trước
+    khi lấy được video nào.
+
+    `errors="replace"` là cố ý: đây là chữ để ĐỌC trên màn hình, không phải dữ
+    liệu ghi vào DB (dữ liệu DB đi qua HTTP/JSON, luôn UTF-8). Thà hiện `?` còn
+    hơn làm hỏng cả lần chạy ingest.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            # stream giả trong test / bị thay bằng object khác → bỏ qua
+            continue
+
+
 def main(argv=None):
+    _utf8_stdout()          # TRƯỚC mọi print: xem `_utf8_stdout`
     ap = argparse.ArgumentParser(description="AniStream ingest worker")
     ap.add_argument("command", choices=["schedule", "catalog", "youtube", "tmdb",
                                         "seasons", "jikan", "episodes",
