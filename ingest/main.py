@@ -521,8 +521,9 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
         # tập trùng ngày chiếu) ⇒ phải xử lý lại KỂ CẢ khi đã có tập.
         r["_can_sua"] = True
     if thieu:
-        print(f"  · {len(fresh_thieu)}/{len(thieu)} anime có danh sách tập SAI "
-              f"(trống hoặc trùng ngày) → thử lại (hỏi TMDB lại sau 1 ngày)")
+        print(f"  · {len(thieu)} anime có danh sách tập SAI (trống hoặc trùng "
+              f"ngày chiếu) · {len(fresh_thieu)} xếp lịch lần này "
+              f"(hỏi lại sau 1 ngày)")
     rows += fresh_thieu
     rows = rows[:int(limit)]
     print(f"  · {len(rows)} anime sẽ xử lý lần này")
@@ -678,7 +679,7 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                                 # 1) tập nằm NGOÀI khoảng chiếu (dữ liệu gộp mùa)
                                 # 2) tập TRÙNG do đánh số lại (1..12 vs 25..36)
                                 n_dup = _prune_duplicate_numbers(DB, row, eps_w)
-                                _prune_episodes_outside(DB, row, win)
+                                n_out = _prune_episodes_outside(DB, row, win)
                             except Exception as e:      # noqa: BLE001
                                 # Dọn là bước phụ: lỗi dọn KHÔNG được làm mất
                                 # việc đã ghi, nhưng phải báo ra (02/11/2026).
@@ -688,6 +689,8 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                                   f"{win['from']} → {win.get('to') or '…'}, "
                                   f"TMDB {n_season} tập"
                                   + (f", dọn {n_dup} tập trùng" if n_dup else "")
+                                  + (f", dọn {n_out} tập ngoài khoảng"
+                                     if n_out else "")
                                   + ")")
                             _mark_checked(DB, row)
                             continue
