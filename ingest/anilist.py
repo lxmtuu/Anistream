@@ -340,7 +340,10 @@ def airing_window(media_id: int) -> Dict[str, Any]:
       Media(id: $id) { %s }
     }""" % WINDOW_FIELDS
     data = gql(q, {"id": int(media_id)})
-    media = ((data or {}).get("data") or {}).get("Media") or {}
+    # `gql()` đã bóc sẵn lớp `data` của GraphQL (trả về `payload["data"]`), nên
+    # ở đây chỉ còn `Media`. Bóc hai lần thì luôn ra rỗng — lỗi thật 02/11/2026:
+    # job chạy 220s, không lỗi, không cảnh báo, mà không bộ nào được cắt tập.
+    media = (data or {}).get("Media") or {}
     return {
         "from": _date_of(media.get("startDate")),
         "to": _date_of(media.get("endDate")),

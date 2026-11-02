@@ -626,6 +626,12 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                              or first_year != int(row["year"])))
                     if merged_look:
                         win = _airing_window(row)
+                        if win.get("from") is None:
+                            # Nói RÕ vì sao không cắt được — đừng để job "xanh"
+                            # mà không ai biết luật đã bị bỏ qua (02/11/2026).
+                            print(f"      · không có ngày chiếu AniList cho "
+                                  f"{row.get('slug')} "
+                                  f"({win.get('error') or 'startDate trống'})")
                         eps_w = tmdb.episode_rows_in_window(
                             row["id"], season, win.get("from"), win.get("to"),
                             row.get("episodes_total")) if win.get("from") else []
