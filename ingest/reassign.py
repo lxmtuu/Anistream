@@ -235,15 +235,114 @@ def apply(DB, plans: List[Dict], only_exact: bool = False) -> int:
     return moved
 
 
+def move_all(DB, from_slug: str, to_slug: str, dry: bool = True) -> int:
+    """Dời TOÀN BỘ link của bộ này sang bộ khác, GIỮ NGUYÊN số tập.
+
+    Dùng khi cả playlist của Muse thuộc về một bộ KHÁC hẳn — thường vì DB thiếu
+    entry đúng. Ca thật 02/11/2026: Muse VN đăng "Hunter x Hunter" bản **2011**
+    (148 tập, AniList 11061) nhưng DB chỉ có bản 1999 (62 tập). Toàn bộ 148 link
+    bị gán vào bản 1999; 86 link vượt tổng nên bị loại ⇒ video nằm im.
+
+    Vì Muse đánh số theo đúng bộ 2011 (1..148), dời sang entry 2011 **không đổi
+    số**. Khác hẳn `plan()` (dời link vượt tổng và TRỪ offset theo mùa trước).
+
+    An toàn — kiểm HẾT rồi mới ghi, sai một điều là bỏ toàn bộ:
+      · cả hai slug phải tồn tại;
+      · đích phải có `episodes_total` ≥ số tập lớn nhất của nguồn;
+      · đích phải CHƯA có link nào (không trộn hai nguồn);
+      · nguồn phải có ít nhất 1 link.
+    Trả số link đã dời.
+    """
+    src = DB.select("anime", f"select=id,slug,episodes_total&slug=eq.{from_slug}&limit=1")
+    dst = DB.select("anime", f"select=id,slug,episodes_total&slug=eq.{to_slug}&limit=1")
+    if not src:
+        raise RuntimeError(f"không có anime slug={from_slug}")
+    if not dst:
+        raise RuntimeError(f"không có anime slug={to_slug}")
+    src, dst = src[0], dst[0]
+    links = DB.select_all(
+        "streaming_links",
+        f"select=id,episode_number&anime_id=eq.{src['id']}&episode_number=gt.0")
+    if not links:
+        raise RuntimeError(f"{from_slug} không có link nào để dời")
+    top = max(int(l["episode_number"]) for l in links)
+    total_dst = dst.get("episodes_total")
+    if not isinstance(total_dst, int) or total_dst < top:
+        raise RuntimeError(
+            f"{to_slug} chỉ có {total_dst} tập, không nhận nổi link tới tập {top}")
+    busy = DB.select("streaming_links",
+                     f"select=id&anime_id=eq.{dst['id']}&limit=1")
+    if busy:
+        raise RuntimeError(f"{to_slug} đã có link — không trộn hai nguồn")
+
+    print(f"\n▶ Dời {len(links)} link: {from_slug} → {to_slug} "
+          f"(tập 1–{top}, đích {total_dst} tập)")
+    if dry:
+        print("  (chưa ghi gì — thêm --apply để thực hiện)")
+        return 0
+
+    for l in links:
+        DB.patch("streaming_links", {"id": l["id"]}, {"anime_id": dst["id"]})
+
+    # Tập của đích: tạo đúng những số CÓ video (không bịa thêm).
+    DB.upsert("episodes",
+              [{"anime_id": dst["id"], "number": int(l["episode_number"]),
+                "title": None, "airing_at": None} for l in links],
+              on_conflict="anime_id,number")
+
+    # Tập của nguồn do CHÍNH LINK sinh ra (không có ngày chiếu, không có tên) mà
+    # giờ không còn video nào → phải xoá, nếu không trang chi tiết vẫn hiện 62
+    # tập trống (đúng lỗi "số tập không khớp nội dung video").
+    left = DB.select("streaming_links",
+                    f"select=id&anime_id=eq.{src['id']}&limit=1")
+    removed = 0
+    if not left:
+        removed = DB.delete("episodes", {"anime_id": src["id"],
+                                         "airing_at": "is.null",
+                                         "title": "is.null"})
+    print(f"  ✓ dời {len(links)} link · {len(links)} tập cho {to_slug}"
+          + (f" · xoá {removed} tập trống của {from_slug}" if removed else ""))
+    DB.log_ingest("links", "move_all", True, len(links))
+    return len(links)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Chuyển link bị gán sai mùa sang đúng entry mùa của nó")
     ap.add_argument("--apply", action="store_true", help="ghi vào DB (mặc định chỉ in)")
     ap.add_argument("--only-exact", action="store_true",
                     help="chỉ chuyển ca khớp tuyệt đối (an toàn nhất)")
+    ap.add_argument("--move-all", action="store_true",
+                    help="dời TOÀN BỘ link của --from sang --to (giữ nguyên số tập)")
+    ap.add_argument("--from", dest="from_slug", default="",
+                    help="slug bộ đang giữ link (dùng với --move-all)")
+    ap.add_argument("--to", dest="to_slug", default="",
+                    help="slug bộ đích (dùng với --move-all)")
+    ap.add_argument("--to-anilist", type=int, default=0,
+                    help="id AniList của bộ đích (thay cho --to, khỏi phải đoán slug)")
     args = ap.parse_args(argv)
 
     DB = dbmod.DB()
+    if args.move_all:
+        to_slug = args.to_slug
+        if not to_slug and args.to_anilist:
+            found = DB.select(
+                "anime",
+                f"select=slug&anilist_id=eq.{int(args.to_anilist)}&limit=1")
+            if not found:
+                # Nổ rõ ràng thay vì đoán slug.
+                print(f"\n✗ chưa có anime anilist_id={args.to_anilist} — "
+                      f"chạy trước: python3 -m ingest.main add "
+                      f"--anilist {args.to_anilist}")
+                return 2
+            to_slug = found[0]["slug"]
+            print(f"  · đích theo AniList {args.to_anilist}: {to_slug}")
+        if not args.from_slug or not to_slug:
+            print("\n✗ --move-all cần --from <slug> và (--to <slug> "
+                  "hoặc --to-anilist <id>)")
+            return 2
+        n = move_all(DB, args.from_slug, to_slug, dry=not args.apply)
+        return 0 if n or not args.apply else 1
     print("\n▶ Chuyển link vượt tổng số tập sang mùa đúng")
     plans = plan(DB)
     print(report(plans))
