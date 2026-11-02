@@ -24,3 +24,6 @@ app/build/
 
 # build tạm của test edge (transpile TS → JS)
 tests/edge/.build/
+
+# CLI Supabase tự sinh (chứa số hiệu phiên bản CLI, không phải cấu hình)
+supabase/.temp/
