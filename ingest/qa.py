@@ -19,7 +19,10 @@ from typing import Any, Dict, List
 def collect(DB) -> Dict[str, Any]:
     """Gom dữ liệu tối thiểu rồi tính vi phạm. Không in, không ghi DB."""
     anime = DB.select_all("anime", "select=id,slug,episodes_total,status")
-    eps = DB.select_all("episodes", "select=anime_id,number")
+    # `airing_at` cần để phát hiện 2 tập cùng một ngày chiếu — dấu hiệu đánh số
+    # lại chồng lên tập cũ (ca `tensei-kizoku-…-3rd-season`: 1..12 + 25..36,
+    # cùng 12 ngày). Trước đây không kiểm nên 24 dòng nằm im rất lâu.
+    eps = DB.select_all("episodes", "select=anime_id,number,airing_at")
     links = DB.select_all(
         "streaming_links",
         "select=anime_id,episode_number,url,platform,region,kind,is_verified",
@@ -34,8 +37,13 @@ def collect(DB) -> Dict[str, Any]:
         slug_seen[slug] = True
 
     eps_by_anime: Dict[int, List[int]] = {}
+    days_by_anime: Dict[int, Dict[str, int]] = {}
     for e in eps:
         eps_by_anime.setdefault(e["anime_id"], []).append(e.get("number"))
+        day = str(e.get("airing_at") or "")[:10]
+        if day:
+            bucket = days_by_anime.setdefault(e["anime_id"], {})
+            bucket[day] = bucket.get(day, 0) + 1
 
     hard: Dict[str, List[str]] = {
         "tap_vuot_tong": [],
@@ -48,6 +56,8 @@ def collect(DB) -> Dict[str, Any]:
         "link_vuot_tong": [],
         "bo_co_link_0_tap": [],
         "bo_khong_biet_tong": 0,
+        "tap_trung_ngay_chieu": [],
+        "bo_hoan_thanh_0_tap": [],
     }
 
     for aid, numbers in eps_by_anime.items():
@@ -88,13 +98,42 @@ def collect(DB) -> Dict[str, Any]:
         if isinstance(n, int) and isinstance(total, int) and total > 0 and n > total:
             soft["link_vuot_tong"].append(f"{a.get('slug')}: tập {n} > {total}")
 
+    for aid, days in days_by_anime.items():
+        a = by_id.get(aid)
+        if not a:
+            continue                      # đã báo ở `dong_mo_coi`
+        dup = {d: c for d, c in days.items() if c > 1}
+        extra = sum(c - 1 for c in dup.values())      # số dòng DƯ so với ngày
+        rows = len(eps_by_anime.get(aid, []))
+        total = a.get("episodes_total")
+        # Một hai tập cùng ngày là double-episode THẬT (ca `chitose` 12/13,
+        # `tensei-goblin` tập 5/6 khác giờ) nên không được làm ồn. Dấu hiệu sai
+        # là NHIỀU dòng trùng ngày mà tổng số dòng không khớp `episodes_total`
+        # — đúng ca `tensei-…-3rd-season` (1..12 + 25..36, 24 dòng / 36 tập).
+        if dup and extra >= 3 and (not isinstance(total, int) or rows != total):
+            soft["tap_trung_ngay_chieu"].append(
+                f"{a.get('slug')}: {extra} dòng trùng ngày, {rows} tập "
+                f"(tổng {total or '?'})")
+
     for aid in has_link:
         if not eps_by_anime.get(aid):
             soft["bo_co_link_0_tap"].append(by_id[aid].get("slug"))
 
+    # Bộ đã chiếu xong, biết tổng số tập, KHÔNG có video nào, mà danh sách tập
+    # cũng trống → app mở ra trang trắng. Không phải lỗi dữ liệu (có thể TMDB
+    # không có bộ đó) nhưng người dùng thấy trang rỗng nên phải hiện ra.
+    for aid, a in by_id.items():
+        if (a.get("status") == "FINISHED"
+                and isinstance(a.get("episodes_total"), int)
+                and a["episodes_total"] > 0
+                and not eps_by_anime.get(aid)
+                and not has_link.get(aid)):
+            soft["bo_hoan_thanh_0_tap"].append(a.get("slug"))
+
     soft["bo_khong_biet_tong"] = sum(
         1 for a in anime if not a.get("episodes_total"))
     soft["link_vuot_tong"] = sorted(set(soft["link_vuot_tong"]))
+    soft["bo_hoan_thanh_0_tap"] = sorted(set(soft["bo_hoan_thanh_0_tap"]))
     return {
         "tong_bo": len(anime),
         "tong_tap": len(eps),
@@ -131,6 +170,14 @@ def report(violations: Dict[str, Any]) -> str:
                      f"ĐỪNG xoá bằng audit --prune)")
         for it in soft["link_vuot_tong"][:5]:
             lines.append(f"      · {it}")
+    if soft.get("tap_trung_ngay_chieu"):
+        lines.append(f"  ⚠ tập TRÙNG NGÀY CHIẾU (nghi đánh số lại chồng tập cũ): "
+                     f"{len(soft['tap_trung_ngay_chieu'])} "
+                     f"({', '.join(str(x) for x in soft['tap_trung_ngay_chieu'][:5])})")
+    if soft.get("bo_hoan_thanh_0_tap"):
+        lines.append(f"  ⚠ bộ đã chiếu xong mà trang TRỐNG (0 tập, 0 video): "
+                     f"{len(soft['bo_hoan_thanh_0_tap'])} "
+                     f"({', '.join(str(x) for x in soft['bo_hoan_thanh_0_tap'][:5])})")
     if soft["bo_co_link_0_tap"]:
         lines.append(f"  ⚠ bộ có link nhưng 0 tập: {len(soft['bo_co_link_0_tap'])} "
                      f"({', '.join(str(x) for x in soft['bo_co_link_0_tap'][:5])})")
