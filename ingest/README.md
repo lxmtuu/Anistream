@@ -893,6 +893,41 @@ Tên tiếng Trung không search được trên AniList → thêm vào `aliases.
 Đây là **phần biên tập tạo giá trị riêng** của app (không đối thủ nào có danh mục này bằng tiếng Việt).
 Mẹo tìm ID: `python3 -m ingest.main` chỉ log tên, tìm trên https://anilist.co rồi lấy số trong URL.
 
+## Ghép tên video với bộ ĐÃ CÓ trong DB (03/11/2026)
+
+Muse VN đăng bằng **tên tiếng Việt**: "Đám Cưới Đom Đóm", "Hội Pháp Sư", "ITEM -
+Những cô gái cộng sinh ở thế giới ngầm". Những tên này **không có** trong AniList
+(romaji/english/native) nên mọi bước ghép tên đều trượt — dù DB đã có bộ đó kèm
+`title_vi` do job D điền từ TMDB.
+
+Đo trên DB: `hotaru-no-yomeiri` 12 tập / **0 link** trong khi kênh vừa đăng
+"Khoảnh khắc nổi bật Tập 01 - Đám Cưới Đom Đóm"; 163 bộ nhưng chỉ 30 bộ có video.
+
+Nay `_link_rows` dựng **chỉ mục tên ngay trong DB** (`_chi_muc_ten`) và thử nó
+**trước** khi gọi AniList:
+
+| khoá được đánh chỉ mục | ví dụ |
+|---|---|
+| `title_vi`, `title_romaji`, `title_english`, `title_native`, `slug` | "đám cưới đom đóm" |
+| bản đã bỏ hậu tố mùa | "re:zero" từ "Re:Zero S4" |
+| tên phụ trong ngoặc | "hội pháp sư" từ "Fairy Tail (Hội Pháp Sư)" |
+
+Quy tắc chọn (KHÔNG đoán bừa):
+
+1. Đúng 1 bộ khớp tên → nhận, **không gọi AniList**, không ghi lại hồ sơ.
+2. Nhiều bộ cùng tên → phân biệt bằng **mùa trong tiêu đề** (`S4`, `Mùa 2`,
+   `(Phần 2)` đọc từ tên hoặc slug) → nếu còn đúng 1 thì nhận.
+3. Không có mùa → chỉ nhận nếu **chỉ một bộ đủ chỗ** cho số tập đó
+   (`episodes_total >= số tập`). Vd "Fairy Tail - Tập 110" ⇒ bộ 175 tập, không
+   phải bộ 102 tập.
+4. Còn nhập nhằng → **trả rỗng**, rơi về đường AniList như cũ (và nếu vẫn không
+   xong thì vào `ingest_unmatched` để thêm alias).
+
+Chốt chặn "không link nào vượt tổng số tập" áp dụng cho **cả** đường này.
+
+Kèm theo: `RE_SEASON` nhận cả "S4" **trần** (Muse viết "Re:Zero … S4 - Tập 83"),
+trước đây chỉ nhận "(S4)" có ngoặc nên "S4" dính vào tên bộ và không khớp gì.
+
 ## Bảng `ingest_unmatched` — tên chưa khớp không còn nằm trong log (03/11/2026)
 
 Job C chỉ `print` danh sách "tên series chưa khớp". Đo 02/11/2026: 163 bộ / 2028

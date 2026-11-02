@@ -63,3 +63,33 @@ class TestDaiTap(unittest.TestCase):
                          'Crayon Shin-chan')
 
 if __name__ == '__main__': unittest.main()
+
+
+class TestMuaVietTat(unittest.TestCase):
+    """Muse VN ghi "S4" TRẦN — "Re:Zero - … S4 - Tập 83" (03/11/2026).
+
+    Trước đây chỉ nhận "(S4)" có ngoặc nên "S4" dính vào tên bộ ⇒ không khớp bộ
+    nào ⇒ mùa 4 của Re:Zero có 0 link dù kênh đăng đủ tập.
+    """
+
+    def test_s4_tran_duoc_nhan_la_mua_4(self):
+        from ingest import youtube
+        p = youtube.parse_title(
+            "Re:Zero - Bắt đầu lại từ con số 0 tại thế giới khác S4 - Tập 83 "
+            "[Việt sub]")
+        self.assertEqual(p["episode"], 83)
+        self.assertEqual(p["season"], 4)
+        self.assertNotIn("S4", p["series_base"], "S4 phải bị bỏ khỏi tên gốc "
+                         "để tìm được bộ trong DB")
+
+    def test_mua_2_tieng_viet_van_dung(self):
+        from ingest import youtube
+        p = youtube.parse_title("Ace of the Diamond act II - Mùa 2 - Tập 17 "
+                                "[Việt sub]")
+        self.assertEqual((p["episode"], p["season"]), (17, 2))
+        self.assertEqual(p["series_base"], "Ace of the Diamond act II")
+
+    def test_ten_co_chu_s_khong_bi_cat(self):
+        from ingest import youtube
+        p = youtube.parse_title("Sousou no Frieren - Tập 12")
+        self.assertIsNone(p["season"], "chữ 'S' trong tên bộ không phải mùa")
