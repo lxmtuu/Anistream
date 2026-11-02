@@ -402,40 +402,57 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
     for i, row in enumerate(rows, 1):
         label = (row.get("title_english") or row.get("title_romaji") or row.get("slug"))[:46]
         try:
-            best, score, how = tmdb.match_anime(row)
-            if not best:
-                no_match.append(f"{label}  ({how})")
-                continue
-            detail = tmdb.fetch_detail(best["id"])
-            title_vi, overview_vi = tmdb.extract_vietnamese(detail)
-
-            # TMDB gộp cả series vào 1 id; AniList tách từng mùa. Phải chọn đúng mùa
-            # thì danh sách tập mới đúng — trước đây bỏ qua MỌI bộ nhiều mùa nên
-            # Takagi-san (3 mùa) không có tập nào dù đã có tmdb_id.
             # Gợi ý mùa từ CHÍNH TÊN bộ: "… 2nd Season" → mùa 2. Không có bước
             # này thì bộ nhiều mùa giống nhau (12–13 tập/mùa) bị bỏ trống danh
             # sách tập dù TMDB có đủ (đo 02/11/2026: 30 bộ FINISHED 0 tập).
             hint_season = tmdb.season_from_title(
                 row.get("title_romaji"), row.get("title_english"),
                 row.get("title_native"))
-            season_no, why = tmdb.pick_season(
-                detail, row.get("year"), row.get("episodes_total"), hint_season)
+            details: dict = {}                 # tmdb_id → detail, tránh gọi 2 lần
 
-            # TMDB gộp nhiều mùa AniList vào MỘT season (DAN DA DAN: 1 mùa
-            # 24 tập = mùa 1 + mùa 2). `pick_season` từ chối ⇒ trước đây bộ
-            # LẶNG LẼ không có tập nào. Nay lấy nửa thứ `hint` rồi trừ offset.
-            split = None
-            if season_no is None:
-                split = tmdb.split_season_offset(
-                    detail, hint_season, row.get("episodes_total"))
-                if split:
-                    season_no = split["season"]
-                    why = (f"gộp mùa — trừ {split['offset']} tập "
-                           f"(TMDB {split['count']} tập)")
+            def detail_of(tv_id: int) -> dict:
+                if tv_id not in details:
+                    details[tv_id] = tmdb.fetch_detail(tv_id)
+                return details[tv_id]
+
+            def season_for(tv_id: int):
+                """(mùa, lý do, split) cho 1 ứng viên TMDB; mùa None = không dùng được."""
+                det = detail_of(tv_id)
+                no, why_ = tmdb.pick_season(
+                    det, row.get("year"), row.get("episodes_total"), hint_season)
+                # TMDB gộp nhiều mùa AniList vào MỘT season (DAN DA DAN: 1 mùa
+                # 24 tập = mùa 1 + mùa 2). `pick_season` từ chối ⇒ trước đây bộ
+                # LẶNG LẼ không có tập nào. Nay lấy nửa thứ `hint` rồi trừ offset.
+                sp = None
+                if no is None:
+                    sp = tmdb.split_season_offset(
+                        det, hint_season, row.get("episodes_total"))
+                    if sp:
+                        no = sp["season"]
+                        why_ = (f"gộp mùa — trừ {sp['offset']} tập "
+                                f"(TMDB {sp['count']} tập)")
+                return no, why_, sp
+
+            # TMDB có thể trả NHIỀU series cho cùng một bộ (đo 02/11/2026:
+            # "The Apothecary Diaries" → 220542 và 333686). Chỉ thử ứng viên
+            # điểm cao nhất thì bộ bị bỏ trắng dù ứng viên khác có đủ mùa.
+            last_why = ""
+            best, score, how = tmdb.match_anime(
+                row, accept=lambda r: season_for(r["id"])[0] is not None)
+            if not best:
+                # không ứng viên nào có mùa cần tìm → lấy ứng viên đầu để báo lý do
+                first, _, how2 = tmdb.match_anime(row)
+                if not first:
+                    no_match.append(f"{label}  ({how2})")
+                    continue
+                _, last_why, _ = season_for(first["id"])
+                multi_season.append(f"{label}  ({last_why})")
+                best, score, how = first, 0.0, how2
+
+            detail = detail_of(best["id"])
+            title_vi, overview_vi = tmdb.extract_vietnamese(detail)
+            season_no, why, split = season_for(best["id"])
             matched = season_no is not None
-            if not matched:
-                # Không im lặng nữa: nói rõ vì sao, kể cả khi TMDB chỉ có 1 mùa.
-                multi_season.append(f"{label}  ({why})")
 
             hint = None
             if matched:

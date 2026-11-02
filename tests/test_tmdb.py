@@ -595,3 +595,51 @@ class TestGopMuaTrenTmdb(unittest.TestCase):
         rows = tmdb.episode_rows(9, season, True, max_number=12, offset=12)
         self.assertEqual([r["number"] for r in rows], list(range(1, 13)))
         self.assertEqual(rows[0]["title"], "T13")   # giữ tên/ngày thật của TMDB
+
+
+class TestThuUngVienKeTiep(unittest.TestCase):
+    """TMDB trả NHIỀU series cho cùng một bộ — phải thử ứng viên kế tiếp.
+
+    Ca thật 02/11/2026: `kusuriya-no-hitorigoto-2nd-season` (mùa 2) tìm ra cả
+    220542 "Dược Sư Tự Sự" (chỉ có mùa 1) và 333686. Chỉ thử ứng viên điểm cao
+    nhất ⇒ bộ bị bỏ trắng dù ứng viên kia có mùa 2.
+    """
+
+    def test_pick_all_tra_nhieu_ung_vien_giam_dan(self):
+        titles = ["The Apothecary Diaries Season 2"]
+        res = [{"id": 1, "name": "The Apothecary Diaries", "original_name": None,
+                "first_air_date": "2023-10-22", "popularity": 50},
+               {"id": 2, "name": "The Apothecary Diaries Season 2",
+                "original_name": None, "first_air_date": "2025-01-10",
+                "popularity": 10}]
+        got = tmdb.pick_all(res, titles, None)
+        self.assertEqual({r["id"] for r, _ in got}, {1, 2}, "phải trả CẢ HAI")
+        scores = [sc for _, sc in got]
+        self.assertEqual(scores, sorted(scores, reverse=True), "điểm giảm dần")
+
+    def test_pick_all_khu_trung_theo_id(self):
+        titles = ["Naruto"]
+        res = [{"id": 7, "name": "Naruto", "first_air_date": "2002-10-03"},
+               {"id": 7, "name": "Naruto", "first_air_date": "2002-10-03"}]
+        self.assertEqual(len(tmdb.pick_all(res, titles, None)), 1)
+
+    def test_match_anime_bo_qua_ung_vien_bi_tu_choi(self):
+        row = {"title_english": "The Apothecary Diaries Season 2",
+               "title_romaji": None, "title_native": None, "year": 2025}
+        # 220542 khớp tên CHÍNH XÁC (điểm cao nhất) nhưng bị `accept` từ chối;
+        # 333686 khớp mờ hơn nhưng có mùa cần tìm → phải nhảy sang ứng viên này.
+        res = [{"id": 220542, "name": "The Apothecary Diaries Season 2",
+                "first_air_date": "2023-10-22", "popularity": 90},
+               {"id": 333686, "name": "The Apothecary Diaries",
+                "first_air_date": "2025-01-10", "popularity": 5}]
+        seen = []
+
+        def accept(r):
+            seen.append(r["id"])
+            return r["id"] == 333686
+
+        with patch.object(tmdb, "_get", return_value={"results": res}), \
+                patch.object(tmdb.time, "sleep"):
+            best, score, _ = tmdb.match_anime(row, accept=accept)
+        self.assertEqual(best["id"], 333686, "phải thử ứng viên kế tiếp")
+        self.assertEqual(seen[0], 220542)

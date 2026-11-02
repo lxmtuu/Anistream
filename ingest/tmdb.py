@@ -22,7 +22,7 @@ import re
 import time
 import unicodedata
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
@@ -161,6 +161,42 @@ def title_score(titles: List[str], result: Dict[str, Any], year: Optional[int]) 
                 if chung and len(chung) / min(len(tt), len(nn)) >= 0.5:
                     return 0.84
     return best
+
+
+def pick_all(
+    results: List[Dict[str, Any]],
+    titles: List[str],
+    year: Optional[int],
+    limit: int = 5,
+) -> List[Tuple[Dict[str, Any], float]]:
+    """NHIỀU kết quả đạt ngưỡng, điểm giảm dần (khử trùng theo id).
+
+    Vì sao cần: cùng một bộ, TMDB có thể trả **nhiều series** — đo 02/11/2026,
+    "The Apothecary Diaries" trả cả 220542 (series chính, chỉ 1 mùa) và 333686.
+    Trước đây chỉ thử kết quả điểm cao nhất; nếu series đó không có mùa cần tìm
+    thì bộ bị bỏ trắng dù ứng viên khác có đủ mùa.
+    """
+    scored: List[Tuple[Dict[str, Any], float]] = []
+    for r in results or []:
+        score = title_score(titles, r, year)
+        if score < TITLE_THRESHOLD:
+            continue
+        ry = _year_of(r.get("first_air_date"))
+        if year and ry and abs(ry - year) > YEAR_TOLERANCE:
+            continue
+        if year and ry and abs(ry - year) <= 1:
+            score += 0.05
+        score += min(r.get("popularity") or 0, 100) / 10000.0
+        scored.append((r, round(min(score, 1.0), 3)))
+    scored.sort(key=lambda x: -x[1])
+    out, seen = [], set()
+    for r, sc in scored:
+        rid = r.get("id")
+        if rid in seen:
+            continue
+        seen.add(rid)
+        out.append((r, sc))
+    return out[:limit]
 
 
 def pick_best(
@@ -581,8 +617,16 @@ def base_title(title: Optional[str]) -> Optional[str]:
 
 
 # ─────────────────────────────────────────── API mức cao (1 anime)
-def match_anime(row: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], float, str]:
-    """Tìm phim trên TMDB cho 1 row `anime`. Trả (result|None, điểm, cách thử)."""
+def match_anime(
+    row: Dict[str, Any],
+    accept: Optional[Callable[[Dict[str, Any]], bool]] = None,
+) -> Tuple[Optional[Dict[str, Any]], float, str]:
+    """Tìm phim trên TMDB cho 1 row `anime`. Trả (result|None, điểm, cách thử).
+
+    `accept(result)` — tuỳ chọn: chỉ nhận kết quả mà hàm này trả True. Dùng để
+    thử **ứng viên kế tiếp** khi kết quả điểm cao nhất không có mùa cần tìm
+    (xem `pick_all`). Tối đa 3 ứng viên mỗi chuỗi tìm.
+    """
     titles = [row.get("title_english"), row.get("title_romaji"), row.get("title_native")]
     titles = [t for t in titles if t]
     year = row.get("year")
@@ -606,24 +650,30 @@ def match_anime(row: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], float, s
             queries.append(b)
 
     tried = []
+    tried_ids: set = set()
     for t in queries:
         params: Dict[str, Any] = {"query": t}
         if year and year_filter is not None:
             params["first_air_date_year"] = year
         res = _get("/search/tv", params).get("results") or []
         tried.append(f"search[{t[:24]}]")
-        best, score = pick_best(res, titles, year_filter)
-        if best:
-            return best, score, tried[-1]
+        fresh = [r for r in res if r.get("id") not in tried_ids]
+        cands = pick_all(fresh, titles, year_filter)
+        for cand, sc in cands[:3]:
+            if accept is None:
+                return cand, sc, tried[-1]
+            if accept(cand):
+                return cand, sc, tried[-1]
+            tried_ids.add(cand.get("id"))     # đã xét, chuỗi sau đừng thử lại
         # lần 2: bỏ ràng buộc năm (TMDB hay lệch năm với AniList). Nếu đã bỏ lọc
         # năm từ đầu (hint mùa ≥2) thì lần 2 là request y hệt → không gọi lại.
         if year and year_filter is not None:
             time.sleep(SLEEP_BETWEEN)
             res2 = _get("/search/tv", {"query": t}).get("results") or []
             tried.append(f"search-noyear[{t[:24]}]")
-            best2, score2 = pick_best(res2, titles, year_filter)
-            if best2:
-                return best2, score2, tried[-1]
+            for cand, sc in pick_all(res2, titles, year_filter)[:3]:
+                if accept is None or accept(cand):
+                    return cand, sc, tried[-1]
         time.sleep(SLEEP_BETWEEN)
     return None, 0.0, "+".join(tried) or "—"
 

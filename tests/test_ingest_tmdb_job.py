@@ -78,7 +78,15 @@ def _detail(seasons=(1,), total=24, meta=None):
 class TestJobTmdb(unittest.TestCase):
     def _run(self, db, seasons=(1,), total=24, match=None, meta=None, eps=None):
         """Chạy job với TMDB giả. `match` cho phép mô phỏng không-khớp hoặc lỗi."""
-        match_fn = match or (lambda row: MATCH)
+        base_match = match or (lambda row: MATCH)
+
+        def match_fn(row, accept=None):
+            """Giả lập `match_anime(row, accept=…)` của code thật."""
+            res = base_match(row)
+            if accept is not None and res[0] is not None and not accept(res[0]):
+                return None, 0.0, res[2]      # không ứng viên nào dùng được
+            return res
+
         with patch.object(tmdb, "is_configured", return_value=True), \
              patch.object(tmdb, "match_anime", side_effect=match_fn), \
              patch.object(tmdb, "fetch_detail",
@@ -416,3 +424,55 @@ class TestLoiGhiHoSoKhongChanDanhSachTap(unittest.TestCase):
                       "409 khi ghi hồ sơ KHÔNG được chặn danh sách tập")
         eps = next(rows for name, rows in db.upserts if name == "episodes")
         self.assertEqual([e["number"] for e in eps], list(range(1, 13)))
+
+
+class TestThuUngVienKeTiepTrongJob(unittest.TestCase):
+    """Ca thật 02/11/2026 (`kusuriya-no-hitorigoto-2nd-season`).
+
+    TMDB trả 2 series cho cùng một bộ; series điểm cao nhất **chỉ có mùa 1**,
+    trong khi entry AniList là **mùa 2**. Trước đây job lấy series đầu, không
+    chọn được mùa → bộ 0 tập. Nay phải thử ứng viên kế tiếp.
+    """
+
+    def test_dung_series_thu_hai_khi_series_dau_thieu_mua(self):
+        row = dict(ROW, slug="kusuriya-2nd", year=2025, episodes_total=24,
+                   title_english="The Apothecary Diaries Season 2")
+        db = FakeDB([row])
+
+        first = {"id": 220542, "name": "The Apothecary Diaries Season 2"}
+        second = {"id": 333686, "name": "The Apothecary Diaries"}
+
+        def fake_match(r, accept=None):
+            for cand in (first, second):
+                if accept is None or accept(cand):
+                    return cand, 0.9, "search[x]"
+            return None, 0.0, "search[x]"
+
+        def fake_detail(tv_id):
+            if tv_id == 220542:      # chỉ có mùa 1 (12 tập) → không dùng được cho mùa 2 (24 tập)
+                return {"id": tv_id, "seasons": [
+                    {"season_number": 1, "episode_count": 12,
+                     "air_date": "2023-10-22"}], "translations": {"translations": []},
+                    "alternative_titles": {"results": []}}
+            return {"id": tv_id, "seasons": [
+                {"season_number": 1, "episode_count": 24, "air_date": "2023-10-22"},
+                {"season_number": 2, "episode_count": 24, "air_date": "2025-01-10"}],
+                "translations": {"translations": []},
+                "alternative_titles": {"results": []}}
+
+        eps = [{"episode_number": i, "name": f"T{i}",
+                "air_date": "2025-01-%02d" % (i % 28 + 1)} for i in range(1, 25)]
+        with patch.object(tmdb, "is_configured", return_value=True), \
+                patch.object(tmdb, "match_anime", side_effect=fake_match), \
+                patch.object(tmdb, "fetch_detail", side_effect=fake_detail), \
+                patch.object(tmdb, "fetch_season",
+                             side_effect=lambda tv, n: {"episodes": eps}), \
+                patch.object(tmdb.time, "sleep"):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ingest_main.job_tmdb(db)
+
+        eps_upserts = [u for u in db.upserted if u[0] == "episodes"]
+        self.assertEqual(len(eps_upserts), 1, "phải lấy được tập từ series thứ hai")
+        self.assertEqual(len(eps_upserts[0][1]), 24)
+        self.assertEqual(db.patched[0][2].get("tmdb_id"), 333686)
