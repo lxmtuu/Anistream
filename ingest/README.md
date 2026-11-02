@@ -194,6 +194,24 @@ Luật này cũng chạy như **fallback cuối** khi season đã chọn có s�
 
 `explain` cũng đi qua luật này nên chẩn đoán và job luôn khớp nhau.
 
+### Job D — `delete` phải nhận toán tử PostgREST như `patch` (02/11/2026)
+
+Lần chạy 16:44 đã lấp đúng 63 tập (petitcure 27/27, tensei 2nd 12/12, yozakura
+12/12) nhưng mỗi bộ in:
+
+```
+! …: RuntimeError: delete episodes lỗi 400: {"code":"22007", … "invalid input
+   syntax for type timestamp with time zone: "lt.…
+```
+
+Vì `patch()` đã hỗ trợ toán tử (`lt.`/`gt.`) còn `delete()` thì chỉ ghép `eq.`
+→ gửi `airing_at=eq.lt.2026-07-06`, Postgres hiểu `lt.…` là giá trị timestamp.
+Hai hàm lệch nhau vì sửa một chỗ.
+
+Nay dùng chung `_FILTER_OPS` cho cả hai, có test gọi `requests.delete` giả và
+kiểm tham số gửi đi (`tests/test_db_filters.py`). Bước dọn cũng được bọc
+try/except: lỗi dọn **không** làm mất tập vừa ghi, nhưng vẫn in cảnh báo.
+
 ### Job D — `gql()` đã bóc `data`, đừng bóc lần nữa (02/11/2026)
 
 Lần chạy 16:26 vẫn 0 tập. `airing_window` viết `data["data"]["Media"]` trong khi
