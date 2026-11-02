@@ -893,6 +893,50 @@ Tên tiếng Trung không search được trên AniList → thêm vào `aliases.
 Đây là **phần biên tập tạo giá trị riêng** của app (không đối thủ nào có danh mục này bằng tiếng Việt).
 Mẹo tìm ID: `python3 -m ingest.main` chỉ log tên, tìm trên https://anilist.co rồi lấy số trong URL.
 
+## Tiêu đề tiếng Việt + tên gốc trong MÔ TẢ + chọn đúng MÙA (03/11/2026)
+
+Sau khi bảng `ingest_unmatched` chạy thật, danh sách lộ ra bức tranh đầy đủ — **DB
+không hề có** những bộ lớn nhất của kênh:
+
+```
+Gia Sư Hitman Reborn!                        65 video
+Đại chiến người Khổng Lồ S1 / S3 / S2 / S4   50 / 45 / 24 / 28 video
+Lúc đó tôi đã chuyển sinh thành Slime Season 4 44 video
+SPY×FAMILY S3                                26 video
+Thất hình đại tội / S2 / S3                  24 video mỗi mùa
+Lớp học ám sát S1 / S2                       22 / 25 video
+```
+
+Hai nguyên nhân, cả hai đều là lỗi thật:
+
+**1. `match.choose_entry` là CODE CHẾT.** Hàm xét mùa ("S3", "Mùa 2") và xét tổng
+số tập (loại entry 62 tập khi video là tập 148) đã có code **và có test**, nhưng
+từ trước tới 03/11/2026 **không được gọi ở đâu**: job C vẫn dùng `resolve` →
+`pick_best`, tức chỉ so tên mờ rồi lấy bộ giống nhất. Vì vậy "Đại chiến người
+Khổng Lồ S3" không bao giờ vào đúng entry mùa 3.
+
+Nay có `match.resolve_series(name, season=…, max_episode=…, year_hint=…)` gọi
+`choose_entry` thật, và job C dùng nó.
+
+**2. Tên gốc nằm trong MÔ TẢ video, chưa từng được đọc.** Tiêu đề là tiếng Việt
+(không có trên AniList), nhưng Muse VN luôn chèn tên romaji/English/Nhật vào mô tả:
+
+```
+Re:Zero kara Hajimeru Isekai Seikatsu S4
+Re:ZERO -Starting Life in Another World- S4
+Re：ゼロから始める異世界生活S4
+```
+
+`youtube.tieu_de_phu(description)` lấy tối đa 4 dòng "trông như tên bộ" (bỏ link,
+hashtag, boilerplate "Muse", "Subscribe", "Nội dung câu chuyện"…), và job C thử
+**tên tiêu đề → tên gốc → tên trong mô tả** theo thứ tự. Tên lấy từ mô tả là văn
+bản tự do nên phải đạt `min_score = 0.85` mới được nhận (tránh gán bừa một câu văn
+vào một bộ nào đó).
+
+Kèm theo: `_upsert_media` sẽ **tạo bộ mới** cho những series này ⇒ catalog mở rộng
+đúng theo những gì kênh thật sự đăng (yêu cầu "mọi nội dung Muse VN phải có trong
+DB"), thay vì chỉ những bộ lọt qua AniList seasonal.
+
 ## Ghép tên video với bộ ĐÃ CÓ trong DB (03/11/2026)
 
 Muse VN đăng bằng **tên tiếng Việt**: "Đám Cưới Đom Đóm", "Hội Pháp Sư", "ITEM -

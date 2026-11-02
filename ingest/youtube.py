@@ -164,6 +164,54 @@ def parse_title(raw: str) -> Optional[Dict]:
             "episode": episode, "season": season, "year_hint": year, "kind": kind}
 
 
+# Dòng trong MÔ TẢ video mà KHÔNG phải tên bộ (boilerplate của Muse VN).
+_BOILER = (
+    "http", "#", "muse", "anime được chiếu", "các bạn", "➨", "✪", "▶️", "▶",
+    "danh sách phát", "subscribe", "facebook", "instagram", "nội dung câu chuyện",
+    "【quy định", "quy định", "fanpage", "khiếu nại", "ủng hộ", "bản quyền",
+    "like", "đăng ký", "chuông", "xem từng tập", "playlist", "livestream",
+    "phòng chat", "admin", "reurl", "fb.me", "instagram.com",
+)
+
+
+def tieu_de_phu(description: str, toi_da: int = 4) -> List[str]:
+    """Tên THAY THẾ của bộ, lấy từ MÔ TẢ video (Muse VN luôn chèn ở đây).
+
+    Vì sao cần (03/11/2026): Muse VN đặt TIÊU ĐỀ bằng tiếng Việt —
+    "Đại chiến người Khổng Lồ S3", "Thất hình đại tội S2", "Lúc đó tôi đã chuyển
+    sinh thành Slime Season 4". Các tên này không có trên AniList. Nhưng MÔ TẢ
+    của đúng video đó lại ghi tên gốc:
+
+        Re:Zero kara Hajimeru Isekai Seikatsu S4
+        Re:ZERO -Starting Life in Another World- S4
+        Re：ゼロから始める異世界生活S4
+
+    Đây là cầu nối duy nhất giữa tên tiếng Việt và AniList — không có nó thì 129
+    series của kênh (65 video của "Gia Sư Hitman Reborn!", 50 video "Đại chiến
+    người Khổng Lồ S1"…) không bao giờ vào được DB.
+
+    Chỉ lấy dòng NGẮN, không phải boilerplate, tối đa `toi_da` dòng; giữ nguyên
+    thứ tự (Muse đặt romaji trước).
+    """
+    out: List[str] = []
+    for raw in (description or "").splitlines():
+        line = raw.strip()
+        if not (2 <= len(line) <= 120):
+            continue
+        low = line.lower()
+        if any(w in low for w in _BOILER):
+            continue
+        # dòng toàn ký tự trang trí / toàn số
+        if not re.search(r"\w", line) or re.fullmatch(r"[\d\W]+", line):
+            continue
+        if line in out:
+            continue
+        out.append(line)
+        if len(out) >= toi_da:
+            break
+    return out
+
+
 def fetch_rss(channel_id: str, limit: int = 25) -> List[Dict]:
     """RSS chính thức của YouTube — không cần API key."""
     url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
@@ -179,12 +227,15 @@ def fetch_rss(channel_id: str, limit: int = 25) -> List[Dict]:
         vid = e.find("yt:videoId", ns)
         ttl = e.find("a:title", ns)
         pub = e.find("a:published", ns)
+        desc = e.find("media:group/media:description", ns)
         views = e.find("media:group/media:community/media:statistics", ns)
         if vid is None or ttl is None:
             continue
         out.append({
             "video_id": vid.text,
             "title": ttl.text or "",
+            # Mô tả chứa tên romaji/English/Nhật của bộ — xem `tieu_de_phu`.
+            "description": (desc.text or "") if desc is not None else "",
             "published": pub.text if pub is not None else "",
             "views": int(views.get("views", 0)) if views is not None else 0,
             "url": f"https://www.youtube.com/watch?v={vid.text}",
@@ -269,6 +320,7 @@ def collect_channel(
             "published": e["published"],
             "views": e.get("views", 0),
             "duration": e.get("duration"),
+            "description": e.get("description") or "",
         })
         out.append(parsed)
         if verbose:

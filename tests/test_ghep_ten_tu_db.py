@@ -155,7 +155,7 @@ class TestLinkRowsDungChiMuc(unittest.TestCase):
     def test_van_ton_trong_chot_chan_vuot_tong(self):
         db = FakeDB([anime(1, 111, title_vi="Đám Cưới Đom Đóm", episodes_total=12)])
         videos = [video("Đám Cưới Đom Đóm", 13)]
-        with patch.object(match, "resolve", side_effect=AssertionError):
+        with patch.object(match, "resolve_series", side_effect=AssertionError):
             _, links, _, review = ingest_main._link_rows(db, videos, {}, verbose=False)
         self.assertEqual(links, [], "tập 13 > 12 tập ⇒ không ghi")
         self.assertEqual(len(review), 1)
@@ -165,7 +165,8 @@ class TestLinkRowsDungChiMuc(unittest.TestCase):
         media = {"id": 999, "title": {"romaji": "Fairy Tail"},
                  "episodes": 175, "popularity": 1, "format": "TV"}
         videos = [video("Fairy Tail", 5)]
-        with patch.object(match, "resolve", return_value=(media, 0.9, "alias")), \
+        with patch.object(match, "resolve_series",
+                          return_value=(media, 0.9, "alias")), \
              patch.object(match, "_ALIASES", {"fairy tail": 6702}), \
              patch.object(ingest_main, "_upsert_media",
                           return_value=([{"id": 7}], {999: 7})):

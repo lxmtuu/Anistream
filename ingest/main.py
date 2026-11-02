@@ -236,24 +236,42 @@ def _tra_chi_muc(idx: Dict[str, List[Dict]], series: str, series_base: str,
     return None, ""
 
 
+def _ten_ung_vien(v: Dict) -> List[tuple]:
+    """Các tên có thể dùng để tìm bộ cho MỘT video, kèm cờ "lấy từ mô tả".
+
+    Thứ tự = độ tin cậy giảm dần: tiêu đề → tên gốc (bỏ "Mùa 2") → tên trong MÔ
+    TẢ (romaji/English/Nhật do Muse VN chèn). Tên từ mô tả là dòng văn bản tự do
+    nên khi ghép phải đòi điểm cao hơn (xem `min_score` ở `resolve_series`).
+    """
+    out: List[tuple] = []
+
+    def add(name, tu_mo_ta=False):
+        n = (name or "").strip()
+        if n and all(_khoa_ten(n) != _khoa_ten(x) for x, _ in out):
+            out.append((n, tu_mo_ta))
+
+    add(v.get("series"))
+    add(v.get("series_base"))
+    for t in youtube.tieu_de_phu(v.get("description") or ""):
+        add(t, True)
+    return out
+
+
 def _link_rows(DB, videos, cache, verbose=True):
     """Ghép tên → anime rồi tạo rows `streaming_links`. Trả (matched, links, unmatched)."""
-    import re
-    import unicodedata
-
-    def exact_title(value):
-        value = unicodedata.normalize("NFKC", value or "").casefold()
-        return re.sub(r"[^\w]+", " ", value).strip()
-
     matched, unmatched, need_review = [], {}, {}
     # Chỉ mục tên bộ có sẵn trong DB (gồm `title_vi`) — thử TRƯỚC khi gọi AniList.
     idx = _chi_muc_ten(DB)
     if idx and verbose:
         print(f"  · chỉ mục tên trong DB: {len(idx)} khoá")
     for i, v in enumerate(videos, 1):
-        local, how_local = _tra_chi_muc(
-            idx, v["series"], v.get("series_base") or v["series"],
-            v.get("season"), v["episode"])
+        ten = _ten_ung_vien(v)
+        local, how_local = None, ""
+        for name, _ in ten:
+            local, how_local = _tra_chi_muc(idx, name, name, v.get("season"),
+                                            v["episode"])
+            if local:
+                break
         if local:
             # Đã có bộ trong DB → KHÔNG cần gọi AniList, và không ghi đè hồ sơ.
             media, confidence, how = local["media"], 1.0, how_local
@@ -265,15 +283,17 @@ def _link_rows(DB, videos, cache, verbose=True):
                 continue
             matched.append((v, media, confidence, how, local["anime_id"]))
             continue
-        media, confidence, how = match.resolve(
-            v["series"], cache, want_series=(v["episode"] > 0))
-        # Fuzzy partial matches can confuse entirely different series or seasons.
-        # Only editorial aliases or exact full titles are published automatically.
-        title = (media or {}).get("title") or {}
-        names = [title.get(k) for k in ("romaji", "english", "native")]
-        alias_exists = match.alias_key(v["series"]) in match._ALIASES
-        exact = exact_title(v["series"]) in {exact_title(n) for n in names if n}
-        if not media or not (alias_exists or exact):
+        # Đường AniList: `resolve_series` xét MÙA ("S3"/"Mùa 2") và SỐ TẬP, nên
+        # "Đại chiến người Khổng Lồ S3" vào đúng entry mùa 3 thay vì bộ mùa 1.
+        media, confidence, how = None, 0.0, ""
+        for name, tu_mo_ta in ten:
+            media, confidence, how = match.resolve_series(
+                name, season=v.get("season"), max_episode=v["episode"],
+                year_hint=v.get("year_hint"), cache=cache,
+                min_score=0.85 if tu_mo_ta else 0.0)
+            if media:
+                break
+        if not media:
             unmatched.setdefault(v["series"], 0)
             unmatched[v["series"]] += 1
             if verbose and i % 50 == 0:

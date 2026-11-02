@@ -146,7 +146,7 @@ def list_videos(playlist_id: str, max_videos: int = 200) -> List[Dict]:
     page_token = None
     while len(out) < max_videos:
         params = {
-            "part": "snippet,contentDetails",
+            "part": "snippet,contentDetails",  # snippet đã có description
             "playlistId": playlist_id,
             "maxResults": min(50, max_videos - len(out)),
         }
@@ -162,6 +162,9 @@ def list_videos(playlist_id: str, max_videos: int = 200) -> List[Dict]:
             out.append({
                 "video_id": vid,
                 "title": sn.get("title") or "",
+                # `snippet.description` (Muse VN chèn tên romaji/English/Nhật) —
+                # thiếu nó thì đường --deep không ghép được tên tiếng Việt.
+                "description": sn.get("description") or "",
                 "published": sn.get("publishedAt") or cd.get("videoPublishedAt") or "",
                 "url": f"https://www.youtube.com/watch?v={vid}",
             })

@@ -95,9 +95,10 @@ class TestJobYoutubePerChannel(unittest.TestCase):
             calls.append(ch["key"])
             return res or []
 
-        def _default_resolve(name, cache, want_series=True):
-            # giống match.resolve thật: ghi kết quả vào cache
-            cache[match.alias_key(name)] = MEDIA
+        def _default_resolve(name, cache=None, **kw):
+            # giống `resolve_series` thật: ghi kết quả vào cache
+            if cache is not None:
+                cache[match.alias_key(name)] = MEDIA
             return MEDIA, 1.0, "alias"
 
         resolve_fn = resolve or _default_resolve
@@ -106,7 +107,7 @@ class TestJobYoutubePerChannel(unittest.TestCase):
                           side_effect=lambda DB, medias: (
                               [{"anilist_id": m["id"]} for m in medias],
                               {m["id"]: 7 for m in medias})), \
-             patch.object(match, "resolve", side_effect=resolve_fn):
+             patch.object(match, "resolve_series", side_effect=resolve_fn):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 if expect_error:
@@ -158,8 +159,8 @@ class TestJobYoutubePerChannel(unittest.TestCase):
         per = {"muse_vn": [video("crayon shinchan", 1)], "ani_one_asia": []}
         search_calls = []
 
-        def counting_resolve(name, cache, want_series=True):
-            if match.alias_key(name) in cache:            # hành vi thật của resolve
+        def counting_resolve(name, cache=None, **kw):
+            if cache is not None and match.alias_key(name) in cache:
                 return cache[match.alias_key(name)], 1.0, "cached"
             search_calls.append(name)
             cache[match.alias_key(name)] = MEDIA          # như resolve thật
@@ -175,7 +176,8 @@ class TestJobYoutubePerChannel(unittest.TestCase):
         db = FakeDB()
         with patch.object(youtube, "collect_channel",
                           return_value=[video("crayon shinchan", 1)]), \
-             patch.object(match, "resolve", return_value=(MEDIA, 1.0, "alias")), \
+             patch.object(match, "resolve_series",
+                          return_value=(MEDIA, 1.0, "alias")), \
              patch.object(ingest_main, "_upsert_media",
                           side_effect=lambda DB, m: (
                               [{"anilist_id": 1}], {99468: 7})), \
@@ -187,7 +189,7 @@ class TestJobYoutubePerChannel(unittest.TestCase):
     def test_tên_chưa_khớp_thì_báo_ra_để_thêm_alias(self):
         db, n, out = self._run(
             {"muse_vn": [video("Bộ phim lạ hoắc", 3)], "ani_one_asia": []},
-            resolve=lambda name, cache, want_series=True: (None, 0.4, "—"))
+            resolve=lambda name, cache=None, **kw: (None, 0.4, "—"))
         self.assertEqual([u for u in db.upserted if u[0] == "streaming_links"], [])
         self.assertIn("Bộ phim lạ hoắc", out)
         self.assertIn("aliases.json", out)
@@ -201,7 +203,8 @@ class TestJobYoutubePerChannel(unittest.TestCase):
         db = FakeDB()
         with patch.object(youtube, "collect_channel",
                           return_value=[video("crayon shinchan", 1)]) as collect, \
-             patch.object(match, "resolve", return_value=(MEDIA, 1.0, "alias")), \
+             patch.object(match, "resolve_series",
+                          return_value=(MEDIA, 1.0, "alias")), \
              patch.object(ingest_main, "_upsert_media",
                           side_effect=lambda DB, m: ([{"anilist_id": 1}], {99468: 7})):
             with redirect_stdout(io.StringIO()):
