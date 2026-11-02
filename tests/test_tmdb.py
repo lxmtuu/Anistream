@@ -861,3 +861,64 @@ class TestTenVietTuBanDiaHoa(unittest.TestCase):
         self.assertTrue(tmdb.looks_vietnamese("Đảo Hải Tặc"))
         self.assertFalse(tmdb.looks_vietnamese("Hunter x Hunter"))
         self.assertFalse(tmdb.looks_vietnamese(""))
+
+
+class TestNhanMuaVaoTenViet(unittest.TestCase):
+    """18 cặp bộ/mùa trùng y nguyên `title_vi` (đo 02/11/2026).
+
+    TMDB trả tên Việt của CẢ series ⇒ "One-Punch Man" và "One-Punch Man Season 2"
+    cùng là "Thánh Phồng Tôm"; trong tìm kiếm hai thẻ không phân biệt được.
+    """
+
+    def test_mua_2_duoc_gan_hau_to(self):
+        self.assertEqual(tmdb.with_season_label("Thánh Phồng Tôm", 2),
+                         "Thánh Phồng Tôm (Phần 2)")
+
+    def test_mua_1_giu_nguyen(self):
+        for no in (None, 0, 1):
+            with self.subTest(no=no):
+                self.assertEqual(tmdb.with_season_label("Dược Sư Tự Sự", no),
+                                 "Dược Sư Tự Sự")
+
+    def test_ten_da_ghi_mua_thi_khong_them(self):
+        for t in ("Dược Sư Tự Sự Phần 2", "One-Punch Man Season 2",
+                  "Mob Psycho 100 Mùa 3", "薬屋のひとりごと 第2期"):
+            with self.subTest(t=t):
+                self.assertEqual(tmdb.with_season_label(t, 2), t)
+
+    def test_khong_co_ten_thi_tra_none(self):
+        self.assertIsNone(tmdb.with_season_label(None, 3))
+        self.assertIsNone(tmdb.with_season_label("   ", 3))
+
+
+class TestNangCapTenTranCu(unittest.TestCase):
+    """Sửa 36 dòng ĐÃ có title_vi (trần) mà không ghi đè bản dịch khác.
+
+    `build_anime_patch` vốn chỉ điền chỗ trống, nên bản vá "(Phần N)" sẽ không
+    bao giờ tới được các bộ đã có tên. Nay chỉ nâng cấp đúng trường hợp tên cũ
+    là bản trần của chính tên mới.
+    """
+
+    ROW = {"slug": "one-punch-man-2", "title_vi": "Thánh Phồng Tôm"}
+
+    def test_nang_cap_ten_tran(self):
+        p = tmdb.build_anime_patch(self.ROW, {"id": 1},
+                                   "Thánh Phồng Tôm (Phần 2)", None, False)
+        self.assertEqual(p.get("title_vi"), "Thánh Phồng Tôm (Phần 2)")
+
+    def test_khong_ghi_de_ban_dich_khac(self):
+        row = {"slug": "x", "title_vi": "Tên Do Người Dịch Đặt"}
+        p = tmdb.build_anime_patch(row, {"id": 1},
+                                   "Thánh Phồng Tôm (Phần 2)", None, False)
+        self.assertNotIn("title_vi", p)
+
+    def test_ten_giong_het_thi_khong_patch(self):
+        row = {"slug": "x", "title_vi": "Thánh Phồng Tôm (Phần 2)"}
+        p = tmdb.build_anime_patch(row, {"id": 1},
+                                   "Thánh Phồng Tôm (Phần 2)", None, False)
+        self.assertNotIn("title_vi", p)
+
+    def test_bo_nhan_mua(self):
+        self.assertEqual(tmdb._bo_nhan_mua("A (Phần 3)"), "A")
+        self.assertEqual(tmdb._bo_nhan_mua("A (Phần 3) "), "A")
+        self.assertEqual(tmdb._bo_nhan_mua("A Phần 3"), "A Phần 3")

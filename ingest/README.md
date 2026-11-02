@@ -80,6 +80,29 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 
 `all` = A + B + C + C' + D + D' + E + F + I + G. (`reassign` chạy tay — xem dưới.)
 
+### Job D — tên Việt của mùa 2, 3 trùng tên mùa 1 (18 cặp, 02/11/2026)
+
+Sau bản vá `title_vi`, **74 bộ** có tên Việt (0 → 74). Nhưng 18 cặp bộ/mùa dùng
+chung một tên vì TMDB trả tên của CẢ series: "Thánh Phồng Tôm" cho cả One-Punch
+Man mùa 1 và mùa 2 ⇒ hai thẻ trong tìm kiếm không phân biệt được.
+
+Nay `with_season_label()` gắn `" (Phần N)"` khi tên bộ ghi mùa ≥ 2
+(`season_from_title`) và tên đó **chưa** có "Phần/Mùa/Season":
+
+```
+Thánh Phồng Tôm          → Thánh Phồng Tôm (Phần 2)     # one-punch-man-2
+Dược Sư Tự Sự Phần 2     → giữ nguyên                    # đã ghi mùa
+Dược Sư Tự Sự            → giữ nguyên                    # mùa 1
+```
+
+`build_anime_patch` vốn **chỉ điền chỗ trống**, nên 36 dòng đã có tên trần sẽ
+không bao giờ nhận hậu tố. Nay nó nâng cấp **đúng một trường hợp**: tên cũ ==
+tên mới bỏ hậu tố `(Phần N)`. Bản dịch khác (do người đặt) **không bị ghi đè** —
+có test canh.
+
+Đã sửa dữ liệu hiện có bằng một câu SQL một lần (`title_vi = title_vi ||
+' (Phần N)'` cho 20 slug mùa ≥ 2) ⇒ **0 nhóm trùng tên**.
+
 ### Job D — `title_vi` = 0/119 bộ: tên Việt nằm ở bản địa hoá, không phải `translations`
 
 Đo 02/11/2026: **119 bộ có `tmdb_id` mà `title_vi` = 0**, trong khi `synopsis_vi`
