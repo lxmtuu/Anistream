@@ -412,6 +412,32 @@ def _prune_episodes_outside(DB, row: dict, win: dict) -> int:
     return removed
 
 
+def _prune_duplicate_numbers(DB, row: dict, eps_written_rows: list) -> int:
+    """Xoá tập TRÙNG sau khi đánh số lại theo khoảng chiếu.
+
+    Ca thật 02/11/2026 (`tensei-kizoku-…-3rd-season`): lần trước ghi 12 tập thành
+    số 13..24, lần này đánh số lại thành 1..12 ⇒ cùng một ngày chiếu tồn tại ở
+    hai số (1..12 và 25..36), trang chi tiết hiện 24 tập trong khi chỉ có 12 tập
+    thật.
+
+    Chỉ xoá khi CHẮC là bản trùng: số > số tập vừa ghi **và** ngày chiếu trùng
+    với một tập vừa ghi. Không đụng tập tương lai (ngày chiếu khác).
+    """
+    if not eps_written_rows:
+        return 0
+    last = max(r["number"] for r in eps_written_rows)
+    dates = {str(r.get("airing_at"))[:10] for r in eps_written_rows}
+    extra = DB.select(
+        "episodes",
+        f"select=number,airing_at&anime_id=eq.{row['id']}&number=gt.{last}")
+    removed = 0
+    for e in extra or []:
+        if str(e.get("airing_at"))[:10] in dates:
+            DB.delete("episodes", {"anime_id": row["id"], "number": e["number"]})
+            removed += 1
+    return removed
+
+
 def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
              refresh: bool = False):
     """Bổ sung tiếng Việt (title_vi, synopsis_vi) + danh sách tập từ TMDB.
@@ -640,16 +666,19 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                                       on_conflict="anime_id,number")
                             eps_written += len(eps_w)
                             try:
-                                n_pruned = _prune_episodes_outside(DB, row, win)
+                                # 1) tập nằm NGOÀI khoảng chiếu (dữ liệu gộp mùa)
+                                # 2) tập TRÙNG do đánh số lại (1..12 vs 25..36)
+                                n_dup = _prune_duplicate_numbers(DB, row, eps_w)
+                                _prune_episodes_outside(DB, row, win)
                             except Exception as e:      # noqa: BLE001
                                 # Dọn là bước phụ: lỗi dọn KHÔNG được làm mất
                                 # việc đã ghi, nhưng phải báo ra (02/11/2026).
-                                n_pruned = 0
+                                n_dup = 0
                                 print(f"      ! dọn tập cũ lỗi ({str(e)[:110]})")
                             print(f"      + {len(eps_w)} tập (theo khoảng chiếu "
                                   f"{win['from']} → {win.get('to') or '…'}, "
                                   f"TMDB {n_season} tập"
-                                  + (f", dọn {n_pruned} tập cũ sai" if n_pruned else "")
+                                  + (f", dọn {n_dup} tập trùng" if n_dup else "")
                                   + ")")
                             _mark_checked(DB, row)
                             continue

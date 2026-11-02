@@ -29,9 +29,13 @@ class FakeDB:
         self.logs = []
         self.dry = False
 
+    select_extra = None
+
     def select(self, table, query):
         if self.queries is not None:
             self.queries.append((table, query))
+        if "number=gt." in query and self.select_extra:
+            return list(self.select_extra.get("episodes", []))
         if table == "anime":
             return list(self.anime_rows)
         if table == "anime_thieu_tap":
@@ -325,6 +329,34 @@ class TestJobTmdb(unittest.TestCase):
         early = [f for t, f in db.deleted if t == "episodes" and "lt." in f.get("airing_at", "")]
         self.assertEqual(len(early), 1, db.deleted)
         self.assertIn("lt.2026-07-06", early[0]["airing_at"])
+
+    def test_don_tap_trung_sau_khi_danh_so_lai(self):
+        """Ca thật 02/11/2026: `tensei-kizoku-…-3rd-season` có 1..12 (đúng) và
+        25..36 (cùng ngày chiếu) → trang chi tiết hiện 24 tập trong khi chỉ có 12
+        tập thật. Phải xoá bản trùng, KHÔNG đụng tập tương lai khác ngày.
+        """
+        import datetime as dt
+        row = dict(ROW, episodes_total=36, year=2026,
+                   title_english="As a Reincarnated Aristocrat… Season 3")
+        start = dt.date(2026, 9, 27)
+        eps = [{"episode_number": i + 1, "name": None,
+                "air_date": (start + dt.timedelta(days=7 * i)).isoformat()}
+               for i in range(12)]
+        meta = {1: {"episode_count": 36, "air_date": "2026-09-27"}}
+        # bảng episodes hiện có: 1 bản trùng (số 25, cùng ngày) + 1 tập tương lai
+        # tập cũ bắt đầu từ 2024 (dữ liệu season gộp) ⇒ job phải xử lý lại
+        db = FakeDB([row], existing_episodes={5: [
+            {"number": 1, "airing_at": "2024-04-07T00:00:00+00:00"}]})
+        db.select_extra = {"episodes": [
+            {"number": 25, "airing_at": "2026-09-27T00:00:00+00:00"},
+            {"number": 36, "airing_at": "2027-06-06T00:00:00+00:00"},
+        ]}
+        _, out = self._run(db, seasons=(1,), total=36, meta=meta, eps=eps,
+                           window={"from": start, "to": None})
+        self.assertIn("dọn 1 tập trùng", out)
+        removed = [f.get("number") for t, f in db.deleted if t == "episodes"]
+        self.assertIn(25, removed)
+        self.assertNotIn(36, removed, "tập tương lai khác ngày chiếu phải giữ")
 
     def test_khong_co_ngay_chieu_anilist_thi_bao_ro(self):
         """Không đọc được ngày chiếu → KHÔNG ghi, và nói rõ vì sao (không im)."""
