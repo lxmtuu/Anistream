@@ -572,9 +572,26 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                             detail, season_no, hint_season, row.get("year"),
                             row.get("episodes_total"), season_count=n_season)
                         if not max_number:
+                            # Luật cuối: cùng một season nhưng TMDB chứa NHIỀU mùa
+                            # liền nhau (24 = 12 + 12, 37 = 25 + 12). Tách theo
+                            # NĂM chiếu của entry AniList; hàm tự kiểm số lượng
+                            # (lệch > 2 → rỗng) nên không ghép bừa.
+                            eps_by_year = tmdb.episode_rows_by_year(
+                                row["id"], season, row.get("year") or 0,
+                                row.get("episodes_total") or 0)
+                            if eps_by_year:
+                                DB.upsert("episodes", eps_by_year,
+                                          on_conflict="anime_id,number")
+                                eps_written += len(eps_by_year)
+                                print(f"      + {len(eps_by_year)} tập (tách theo "
+                                      f"năm {row.get('year')} trong {n_season} "
+                                      f"tập TMDB)")
+                                _mark_checked(DB, row)
+                                continue
                             implausible.append(
                                 f"{label}  (TMDB {n_season} tập > AniList "
-                                f"{row.get('episodes_total')})")
+                                f"{row.get('episodes_total')}, năm "
+                                f"{row.get('year')} không tách được)")
                     if plausible or max_number:
                         if max_number:
                             print(f"      · TMDB có {n_season} tập, cắt còn "

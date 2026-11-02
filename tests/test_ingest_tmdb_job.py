@@ -174,6 +174,46 @@ class TestJobTmdb(unittest.TestCase):
         self.assertEqual([u for u in db.upserted if u[0] == "episodes"], [])
         self.assertIn("KHÔNG hợp với AniList", out)
 
+    def test_season_don_mua_tach_theo_nam(self):
+        """Ca thật 02/11/2026 (`yozakura-san-chi-no-daisakusen-2nd-season`).
+
+        TMDB trả một season **24 tập** cho series, AniList biết 12 tập và năm
+        2026. `episodes_plausible` từ chối (24 > 12), `first_season_cut` từ chối
+        (tên ghi mùa 2) → trước đây bỏ trắng. Nay tách theo NGÀY CHIẾU.
+        """
+        row = dict(ROW, episodes_total=12, year=2026,
+                   title_english="Mission: Yozakura Family Season 2")
+        eps, n = [], 1
+        for y, c in ((2025, 12), (2026, 12)):
+            for i in range(c):
+                eps.append({"episode_number": n, "name": f"T{n}",
+                            "air_date": f"{y}-01-{i % 28 + 1:02d}"})
+                n += 1
+        # TMDB thật: `seasons[].episode_count` báo 12 nhưng danh sách tập trả
+        # về 24 (số liệu trong detail bị lệch). Vì vậy luật trừ offset (đòi
+        # 24 ≈ 2×12) không chạy được, phải tách theo NĂM.
+        meta = {1: {"episode_count": 12, "air_date": "2025-01-10"}}
+        db = FakeDB([row])
+        _, out = self._run(db, seasons=(1,), total=24, meta=meta, eps=eps)
+        upserts = [u for u in db.upserted if u[0] == "episodes"]
+        self.assertEqual(len(upserts), 1, "phải tách được 12 tập của năm 2026")
+        nums = [r["number"] for r in upserts[0][1]]
+        self.assertEqual(nums, list(range(1, 13)))
+        self.assertTrue(all(r["airing_at"].startswith("2026")
+                            for r in upserts[0][1]))
+        self.assertIn("tách theo", out)
+
+    def test_khong_tach_duoc_thi_van_khong_ghi(self):
+        """Năm không có tập nào khớp số lượng → vẫn KHÔNG ghi (không ghép bừa)."""
+        row = dict(ROW, episodes_total=12, year=2019)
+        eps = [{"episode_number": i, "name": f"T{i}",
+                "air_date": "2026-01-%02d" % (i % 28 + 1)} for i in range(1, 25)]
+        meta = {1: {"episode_count": 12, "air_date": "2026-01-10"}}
+        db = FakeDB([row])
+        _, out = self._run(db, seasons=(1,), total=24, meta=meta, eps=eps)
+        self.assertEqual([u for u in db.upserted if u[0] == "episodes"], [])
+        self.assertIn("không tách được", out)
+
     def test_khong_match_thi_khong_ghi_gi(self):
         db = FakeDB([dict(ROW)])
         n, out = self._run(db, match=lambda row: (None, 0.0, "search[x]"))
