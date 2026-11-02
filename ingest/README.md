@@ -194,6 +194,15 @@ Luật này cũng chạy như **fallback cuối** khi season đã chọn có s�
 
 `explain` cũng đi qua luật này nên chẩn đoán và job luôn khớp nhau.
 
+### Job D — đánh số lại thì phải xoá bản TRÙNG (02/11/2026)
+
+Lần chạy 17:21 dọn đúng 24 tập cũ nhưng `tensei-kizoku-…-3rd-season` còn **24
+dòng**: 1..12 (đúng) và 25..36 (**cùng ngày chiếu** — dư từ lần đánh số trước).
+Dọn theo "ngoài khoảng chiếu" không bắt được vì chúng nằm TRONG khoảng.
+
+Nay `_prune_duplicate_numbers` xoá tập có **số > số tập vừa ghi** *và* **ngày
+chiếu trùng** một tập vừa ghi. Tập tương lai khác ngày chiếu được giữ nguyên.
+
 ### Job D — `delete` phải nhận toán tử PostgREST như `patch` (02/11/2026)
 
 Lần chạy 16:44 đã lấp đúng 63 tập (petitcure 27/27, tensei 2nd 12/12, yozakura
