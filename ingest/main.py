@@ -21,7 +21,7 @@ import datetime as dt
 import re
 import sys
 import time
-from typing import Dict
+from typing import Dict, List, Optional
 
 from . import anilist, config, db as dbmod, jikan, match, qa, tmdb, youtube
 
@@ -102,6 +102,140 @@ def job_catalog(DB, pages: int = 2):
 
 
 # ─────────────────────────────────────────────── Job C
+# ─────────────────────────────────── Ghép tên video → bộ bằng DỮ LIỆU TRONG DB
+_TEN_FIELDS = ("title_vi", "title_romaji", "title_english", "title_native", "slug")
+# Hậu tố mùa: "(Phần 2)", "Phần 2", "Mùa 2", "Season 2", "2nd Season", "S4".
+_RE_BO_MUA = re.compile(
+    r"(?:\b(?:phần|phan|mùa|mua|season)\s*\d{1,2}\b"
+    r"|\bs\d{1,2}\b"
+    r"|\b\d{1,2}(?:st|nd|rd|th)\s+season\b)",
+    re.IGNORECASE,
+)
+
+
+def _khoa_ten(value: str) -> str:
+    """Chuẩn hoá tên để so khớp: NFKC + casefold + bỏ ký tự không phải chữ/số."""
+    import unicodedata
+    v = unicodedata.normalize("NFKC", value or "").casefold()
+    return re.sub(r"[^\w]+", " ", v).strip()
+
+
+def _bo_mua(value: str) -> str:
+    """Bỏ hậu tố mùa để "… (Phần 2)" và "… S2" về cùng một tên gốc."""
+    v = _RE_BO_MUA.sub(" ", value or "")
+    # "(Phần 2)" → sau khi bỏ còn "()" ⇒ bỏ luôn ngoặc rỗng/dấu câu thừa.
+    v = re.sub(r"[\(\)\[\]\{\}]+", " ", v)
+    return re.sub(r"\s{2,}", " ", v).strip()
+
+
+def _mua_cua_bo(row: Dict) -> Optional[int]:
+    """Số mùa của một bộ trong DB, đọc từ tên/slug.
+
+    `tmdb.season_from_title` cố tình KHÔNG đọc "(Phần N)" (vì "Phần" thường là
+    cour trong cùng một mùa TMDB). Nhưng chính job D tự gắn hậu tố " (Phần N)"
+    vào `title_vi` của bộ mùa ≥ 2 — nên với dữ liệu CỦA MÌNH, hậu tố đó là mùa
+    thật. Không đọc nó thì hai bộ "Koori no Jouheki" và "… (Phần 2)" không phân
+    biệt được, và mọi video đều bị coi là nhập nhằng ⇒ 0 link.
+    """
+    mua = tmdb.season_from_title(row.get("title_romaji"), row.get("title_english"),
+                                 row.get("title_native"), row.get("slug"))
+    if isinstance(mua, int):
+        return mua
+    m = re.search(r"\(\s*(?:phần|phan|mùa|mua|season)\s*(\d{1,2})\s*\)\s*$",
+                  row.get("title_vi") or "", re.IGNORECASE)
+    return int(m.group(1)) if m else None
+
+
+def _chi_muc_ten(DB) -> Dict[str, List[Dict]]:
+    """Chỉ mục tên bộ ĐÃ CÓ trong DB → tìm được ngay, không cần AniList.
+
+    VÌ SAO CẦN (03/11/2026): Muse VN đăng bằng **tên tiếng Việt** — "Đám Cưới Đom
+    Đóm", "Hội Pháp Sư", "Những cô gái cộng sinh ở thế giới ngầm". Các tên này
+    KHÔNG có trong AniList (romaji/english/native) nên mọi bước ghép tên đều
+    trượt, dù DB đã có bộ đó kèm `title_vi` do TMDB điền.
+
+    Hệ quả đo được: `hotaru-no-yomeiri` 12 tập / **0 link** trong khi kênh vừa
+    đăng "Khoảnh khắc nổi bật Tập 01 - Đám Cưới Đom Đóm"; 163 bộ nhưng chỉ 30 bộ
+    có video.
+
+    Chỉ mục gồm cả tên GỐC (bỏ "Mùa 2", "S4", "(Phần 3)") để video ghi mùa vẫn
+    tìm được bộ; số mùa của từng bộ lấy từ chính tên (giống job D).
+    """
+    try:
+        rows = DB.select_all(
+            "anime",
+            "select=id,anilist_id,slug,title_vi,title_romaji,title_english,"
+            "title_native,episodes_total,popularity,format,year")
+    except Exception as e:                  # noqa: BLE001 — ghép tên vẫn chạy được
+        print(f"  ! không dựng được chỉ mục tên từ DB ({type(e).__name__}: "
+              f"{str(e)[:90]}) → chỉ ghép qua AniList")
+        return {}
+
+    idx: Dict[str, List[Dict]] = {}
+    for r in rows:
+        if not r.get("anilist_id"):
+            continue
+        media = {
+            "id": r["anilist_id"],
+            "title": {"romaji": r.get("title_romaji"),
+                      "english": r.get("title_english"),
+                      "native": r.get("title_native")},
+            "episodes": r.get("episodes_total"),
+            "popularity": r.get("popularity"),
+            "format": r.get("format"),
+        }
+        entry = {"anime_id": r["id"], "anilist_id": r["anilist_id"],
+                 "media": media, "episodes": r.get("episodes_total"),
+                 "year": r.get("year"),
+                 "season": _mua_cua_bo(r)}
+        keys = set()
+        for field in _TEN_FIELDS:
+            value = r.get(field)
+            if not value:
+                continue
+            for k in (_khoa_ten(value), _khoa_ten(_bo_mua(value))):
+                if k:
+                    keys.add(k)
+            # Tên phụ trong ngoặc: "Fairy Tail (Hội Pháp Sư)" — Muse VN có lúc chỉ
+            # đăng "Hội Pháp Sư - Tập 12". Bỏ phần này đi là mất cả bộ.
+            for inner in re.findall(r"\(([^)]{3,})\)|\[([^\]]{3,})\]", value):
+                k = _khoa_ten(next((x for x in inner if x), ""))
+                if k:
+                    keys.add(k)
+        for k in keys:
+            idx.setdefault(k, []).append(entry)
+    return idx
+
+
+def _tra_chi_muc(idx: Dict[str, List[Dict]], series: str, series_base: str,
+                 season_hint, episode: int):
+    """(entry, lý do) hoặc (None, ""). KHÔNG đoán khi còn nhiều bộ khả dĩ."""
+    if not idx:
+        return None, ""
+    for name in (series, series_base, _bo_mua(series)):
+        key = _khoa_ten(name)
+        if not key:
+            continue
+        cands = idx.get(key)
+        if not cands:
+            continue
+        uniq = {c["anilist_id"]: c for c in cands}
+        cands = list(uniq.values())
+        if len(cands) == 1:
+            return cands[0], "khớp tên bộ có trong DB"
+        if isinstance(season_hint, int):
+            same = [c for c in cands if c["season"] == season_hint]
+            if len(same) == 1:
+                return same[0], f"khớp tên + mùa {season_hint} có trong DB"
+        # Không có mùa trong tiêu đề: chỉ nhận nếu chỉ MỘT bộ đủ chỗ cho tập này.
+        du = [c for c in cands
+              if not isinstance(c["episodes"], int) or c["episodes"] >= episode]
+        if len(du) == 1:
+            return du[0], "khớp tên bộ có trong DB"
+        return None, ""            # nhập nhằng → để alias người biên tập quyết
+    return None, ""
+
+
 def _link_rows(DB, videos, cache, verbose=True):
     """Ghép tên → anime rồi tạo rows `streaming_links`. Trả (matched, links, unmatched)."""
     import re
@@ -112,7 +246,25 @@ def _link_rows(DB, videos, cache, verbose=True):
         return re.sub(r"[^\w]+", " ", value).strip()
 
     matched, unmatched, need_review = [], {}, {}
+    # Chỉ mục tên bộ có sẵn trong DB (gồm `title_vi`) — thử TRƯỚC khi gọi AniList.
+    idx = _chi_muc_ten(DB)
+    if idx and verbose:
+        print(f"  · chỉ mục tên trong DB: {len(idx)} khoá")
     for i, v in enumerate(videos, 1):
+        local, how_local = _tra_chi_muc(
+            idx, v["series"], v.get("series_base") or v["series"],
+            v.get("season"), v["episode"])
+        if local:
+            # Đã có bộ trong DB → KHÔNG cần gọi AniList, và không ghi đè hồ sơ.
+            media, confidence, how = local["media"], 1.0, how_local
+            # Chốt chặn "không link nào vượt tổng số tập" áp dụng CẢ đường này.
+            total = media.get("episodes")
+            if isinstance(total, int) and total > 0 and v["episode"] > total:
+                key = f'{v["series"]} (tập {v["episode"]} > {total} tập)'
+                need_review[key] = need_review.get(key, 0) + 1
+                continue
+            matched.append((v, media, confidence, how, local["anime_id"]))
+            continue
         media, confidence, how = match.resolve(
             v["series"], cache, want_series=(v["episode"] > 0))
         # Fuzzy partial matches can confuse entirely different series or seasons.
@@ -138,18 +290,20 @@ def _link_rows(DB, videos, cache, verbose=True):
             need_review[key] = need_review.get(key, 0) + 1
             continue
 
-        matched.append((v, media, confidence, how))
+        matched.append((v, media, confidence, how, None))
 
     if not matched:
         return [], [], unmatched, need_review
 
-    # upsert anime trước để có id
-    rows, id_map = _upsert_media(DB, [m for _, m, _, _ in matched])
+    # upsert anime trước để có id (chỉ bộ mới đến từ AniList; bộ đã có trong DB
+    # đã có `anime_id` nên không ghi lại hồ sơ)
+    moi = [m for _, m, _, _, aid in matched if aid is None]
+    rows, id_map = _upsert_media(DB, moi) if moi else ([], {})
 
     links, seen_url = [], set()
-    for v, media, conf, how in matched:
+    for v, media, conf, how, da_co in matched:
         # dry-run chưa có id thật → dùng anilist_id làm chỗ giữ để đếm cho đúng
-        aid = id_map.get(media["id"]) or (media["id"] if DB.dry else None)
+        aid = da_co or id_map.get(media["id"]) or (media["id"] if DB.dry else None)
         if not aid or v["url"] in seen_url:
             continue
         seen_url.add(v["url"])

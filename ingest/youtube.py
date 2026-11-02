@@ -67,8 +67,12 @@ RE_EN_EP = re.compile(r"(?:^|[\s\-–—:|])(?:episode|ep)\.?\s*(\d{1,4})" + _RA
                       re.IGNORECASE)
 RE_SxE   = re.compile(r"\(S\d+\s*E(\d{1,3})\)", re.IGNORECASE)
 # Mùa được viết nhiều kiểu; Muse VN dùng "Mùa 2" (tiếng Việt) là chính.
+# Bổ sung 03/11/2026: Muse VN viết tắt trần "S4" — "Re:Zero - ... S4 - Tập 83".
+# Trước đây chỉ nhận "(S4)" có NGOẶC, nên "S4" dính vào tên bộ → không khớp được
+# bộ nào (Re:Zero mùa 4 trong DB có 0 link dù kênh đăng đủ tập).
 RE_SEASON = re.compile(
     r"(?:\(S(?P<paren>\d+)\)"
+    r"|(?:^|[\s\-–—:|])s(?P<short>\d{1,2})(?![\w\d])"
     r"|(?:^|[\s\-–—:|])(?:mùa|mua|season|phần|phan)\s*(?P<word>\d{1,2})\b)",
     re.IGNORECASE,
 )
@@ -112,7 +116,8 @@ def parse_title(raw: str) -> Optional[Dict]:
     season = None
     m_season = RE_SEASON.search(title)
     if m_season:
-        season = int(m_season.group("paren") or m_season.group("word"))
+        season = int(m_season.group("paren") or m_season.groupdict().get("short")
+                     or m_season.group("word"))
 
     # 1) số tập (có thể là DẢI TẬP — xem `_RANGE`)
     episode = 0
