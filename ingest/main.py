@@ -353,8 +353,13 @@ def job_link_episodes(DB, limit: int = 20000):
 
 
 # ─────────────────────────────────────────────── Job D
-TMDB_COLS = ("id, slug, title_romaji, title_english, title_native, title_vi, "
-             "synopsis_vi, year, episodes_total, tmdb_id, tmdb_checked_at")
+# `anilist_id` BẮT BUỘC có trong danh sách này: luật cắt tập theo khoảng chiếu
+# (anilist.airing_window) tra theo nó. Thiếu nó thì `_airing_window` luôn trả {}
+# và toàn bộ luật mới im lặng không chạy (đúng lỗi đo được 02/11/2026: job chạy
+# 6,5s "thành công" mà không ghi gì).
+TMDB_COLS = ("id, slug, anilist_id, title_romaji, title_english, title_native, "
+             "title_vi, synopsis_vi, year, episodes_total, tmdb_id, "
+             "tmdb_checked_at")
 
 
 def _mark_checked(DB, row: dict) -> None:
@@ -459,6 +464,31 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
         print(f"  · {len(cand)} anime cần làm giàu · bỏ qua bộ đã hỏi TMDB "
               f"trong {stale_after} ngày")
     rows = [r for r in cand if tmdb.is_stale(r.get("tmdb_checked_at"), cutoff)]
+
+    # Bộ ĐÁNG có tập mà bảng `episodes` đang trống (view `anime_thieu_tap`).
+    # Hai query trên đều bỏ sót nhóm này (đã có title_vi + episodes_total, hoặc
+    # không ở trạng thái RELEASING) nên trước đây chúng 0 tập MÃI MÃI.
+    # Chúng tự rời view khi có tập ⇒ không tốn thời gian lâu dài; vì vậy chỉ
+    # hoãn 1 ngày (thay vì 7) để bản vá mới có tác dụng sớm.
+    seen = {r.get("id") for r in rows}
+    try:
+        thieu = DB.select(
+            "anime_thieu_tap",
+            f"select={TMDB_COLS}&order=popularity.desc&limit={over}")
+    except Exception as e:                      # noqa: BLE001
+        print(f"  ⚠ không đọc được view anime_thieu_tap ({str(e)[:70]})")
+        print("      → áp migration db/migrations/20261102_view_anime_thieu_tap.sql"
+              " để bộ 0 tập được thử lại")
+        thieu = []
+    fresh_thieu = [r for r in thieu
+                   if r.get("id") not in seen
+                   and tmdb.is_stale(r.get("tmdb_checked_at"),
+                                     tmdb.stale_cutoff(
+                                         tmdb.STALE_DAYS_RELEASING))]
+    if thieu:
+        print(f"  · {len(fresh_thieu)}/{len(thieu)} anime có tổng tập nhưng "
+              f"0 tập → thử lại (hỏi TMDB lại sau 1 ngày)")
+    rows += fresh_thieu
     rows = rows[:int(limit)]
     print(f"  · {len(rows)} anime sẽ xử lý lần này")
 

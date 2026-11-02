@@ -25,6 +25,7 @@ class FakeDB:
         self.patched = []
         self.upserted = []
         self.deleted = []
+        self.thieu_tap = []
         self.logs = []
         self.dry = False
 
@@ -33,6 +34,8 @@ class FakeDB:
             self.queries.append((table, query))
         if table == "anime":
             return list(self.anime_rows)
+        if table == "anime_thieu_tap":
+            return self.thieu_tap
         if table == "episodes":
             # query chứa anime_id=eq.<id>
             for aid, eps in self.existing_episodes.items():
@@ -58,7 +61,8 @@ class FakeDB:
 
 
 ROW = {
-    "id": 5, "slug": "kusuriya", "title_romaji": "Kusuriya no Hitorigoto",
+    "id": 5, "slug": "kusuriya", "anilist_id": 104578,
+    "title_romaji": "Kusuriya no Hitorigoto",
     "title_english": "The Apothecary Diaries", "title_native": None,
     "title_vi": None, "synopsis_vi": None, "year": 2023,
     "episodes_total": None, "tmdb_id": None,
@@ -93,9 +97,15 @@ class TestJobTmdb(unittest.TestCase):
                 return None, 0.0, res[2]      # không ứng viên nào dùng được
             return res
 
+        self.window_ids = []
+
+        def fake_window(aid):
+            self.window_ids.append(aid)
+            return window or {}
+
         with patch.object(tmdb, "is_configured", return_value=True), \
-             patch.object(ingest_main, "_airing_window",
-                          return_value=window or {}), \
+             patch.object(ingest_main.anilist, "airing_window",
+                          side_effect=fake_window), \
              patch.object(tmdb, "match_anime", side_effect=match_fn), \
              patch.object(tmdb, "fetch_detail",
                           side_effect=lambda tv: _detail(seasons=seasons, total=total,
@@ -275,6 +285,8 @@ class TestJobTmdb(unittest.TestCase):
         self.assertEqual([r["number"] for r in upserts[0][1]], list(range(1, 13)))
         self.assertEqual(upserts[0][1][0]["title"], "T1")
         self.assertIn("theo khoảng chiếu", out)
+        self.assertEqual(self.window_ids, [104578],
+                         "phải tra AniList bằng anilist_id của ĐÚNG bộ đó")
         # không có tập nào nằm ngoài khoảng chiếu để dọn
         deletes = [d for d in db.deleted if d[0] == "episodes"]
         dates = [f for _, f in deletes]
@@ -329,6 +341,31 @@ class TestJobTmdb(unittest.TestCase):
                            window={})
         self.assertEqual([u for u in db.upserted if u[0] == "episodes"], [])
         self.assertIn("KHÔNG hợp", out)
+
+    def test_cot_anilist_id_phai_duoc_select(self):
+        """Lỗi thật 02/11/2026: `TMDB_COLS` thiếu `anilist_id` ⇒ `airing_window`
+        luôn trả {} ⇒ mọi luật "cắt theo khoảng chiếu" im lặng không chạy, job
+        vẫn báo thành công. Test này chặn tái diễn.
+        """
+        for col in ("id", "anilist_id", "year", "episodes_total", "tmdb_id",
+                    "tmdb_checked_at"):
+            self.assertIn(col, ingest_main.TMDB_COLS)
+        # và id đó phải được dùng thật: kiểm ở ca cắt theo khoảng chiếu
+        # (test_mua_tmdb_dai_hon_thi_cat_theo_khoang_chieu).
+
+    def test_view_thieu_tap_duoc_them_vao_hang_doi(self):
+        """Bộ đã có tên VI + episodes_total nhưng 0 tập không nằm trong 2 query
+        cũ → phải được lấy từ view `anime_thieu_tap` mới thử lại được."""
+        db = FakeDB([])
+        db.thieu_tap = [dict(ROW, id=77, slug="thieu-tap",
+                             tmdb_checked_at=None)]
+        n, out = self._run(db, window={})
+        self.assertIn("0 tập → thử lại", out)
+        touched = ([f.get("id") for _, f, _ in self._real_patches(db)]
+                   + [r.get("anime_id") for t, rows in db.upserted if t == "episodes"
+                      for r in rows])
+        self.assertIn(77, touched, "bộ 0 tập phải được xử lý thật, không chỉ nằm "
+                                   "trong danh sách")
 
     def test_khong_match_thi_khong_ghi_gi(self):
         db = FakeDB([dict(ROW)])

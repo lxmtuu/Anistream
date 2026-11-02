@@ -194,6 +194,25 @@ Luật này cũng chạy như **fallback cuối** khi season đã chọn có s�
 
 `explain` cũng đi qua luật này nên chẩn đoán và job luôn khớp nhau.
 
+### Job D — bộ "0 tập mãi" và lỗi cột thiếu (02/11/2026)
+
+Lần chạy `--refresh` 16:09 in "thành công" mà **không ghi gì**. Hai lỗi:
+
+1. **`TMDB_COLS` thiếu `anilist_id`** ⇒ `_airing_window()` luôn trả `{}` ⇒ mọi
+   luật cắt-theo-khoảng-chiếu im lặng không chạy. Test cũ vẫn xanh vì chúng
+   patch thẳng `_airing_window`. Nay test patch `anilist.airing_window` (đi qua
+   helper thật) và có test chặn cứng: `anilist_id` phải nằm trong `TMDB_COLS`.
+2. **Bộ 0 tập không nằm trong hàng đợi nào**: chế độ thường chỉ lấy bộ thiếu
+   `title_vi/synopsis_vi/episodes_total`, chế độ `--refresh` chỉ lấy `RELEASING`.
+   Bộ đã có tên VI + tổng tập nhưng bảng `episodes` trống thì **không bao giờ**
+   được thử lại.
+
+Nay có **view `anime_thieu_tap`** (`db/migrations/20261102_view_anime_thieu_tap.sql`):
+`episodes_total > 0`, không phải `NOT_YET_RELEASED`, và chưa có tập nào. Job đọc
+view này ở **cả hai chế độ**, hoãn 1 ngày (thay vì 7) — bộ nào lấp được tập thì
+tự rời view nên không tốn thời gian lâu dài. Nếu view chưa được áp, job in cảnh
+báo kèm đường dẫn migration (không im lặng).
+
 ### Job D — cắt tập theo KHOẢNG CHIẾU của AniList (02/11/2026)
 
 Lần chạy 15:46 vẫn bỏ 3 bộ. Truy ra hai sự thật **khác nhau**, và cả hai đều chỉ
