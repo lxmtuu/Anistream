@@ -922,3 +922,60 @@ class TestNangCapTenTranCu(unittest.TestCase):
         self.assertEqual(tmdb._bo_nhan_mua("A (Phần 3)"), "A")
         self.assertEqual(tmdb._bo_nhan_mua("A (Phần 3) "), "A")
         self.assertEqual(tmdb._bo_nhan_mua("A Phần 3"), "A Phần 3")
+
+
+class TestGhepNhieuMua(unittest.TestCase):
+    """TMDB tách MỘT entry AniList thành NHIỀU mùa (fairy-tail).
+
+    Đo 02/11/2026: AniList `fairy-tail` 175 tập; TMDB 46261 mùa 1 chỉ **48 tập**
+    (2009-10 → 2010-09). `pick_season` không mùa nào bằng 175 nên job chỉ ghi 48
+    tập (mãi mãi), 127 tập còn lại không bao giờ vào DB.
+    """
+
+    DETAIL = {"seasons": [
+        {"season_number": 0, "episode_count": 9},     # special — phải bỏ qua
+        {"season_number": 1, "episode_count": 48},
+        {"season_number": 2, "episode_count": 48},
+        {"season_number": 3, "episode_count": 79},
+    ]}
+
+    def test_ghep_du_cac_mua(self):
+        self.assertEqual(tmdb.seasons_span(self.DETAIL, 1, 175), [1, 2, 3])
+
+    def test_ghep_tu_mua_giua(self):
+        self.assertEqual(tmdb.seasons_span(self.DETAIL, 2, 127), [2, 3])
+
+    def test_lech_mot_tap_thi_khong_ghep(self):
+        self.assertEqual(tmdb.seasons_span(self.DETAIL, 1, 174), [])
+        self.assertEqual(tmdb.seasons_span(self.DETAIL, 1, 176), [])
+
+    def test_mot_mua_thi_khong_can_ghep(self):
+        self.assertEqual(tmdb.seasons_span(self.DETAIL, 1, 48), [])
+
+    def test_thieu_tong_thi_khong_ghep(self):
+        self.assertEqual(tmdb.seasons_span({"seasons": []}, 1, 175), [])
+        self.assertEqual(tmdb.seasons_span(self.DETAIL, 1, None), [])
+
+    def _season(self, no, n):
+        return {"season_number": no, "episodes": [
+            {"episode_number": i, "name": f"T{no}-{i}",
+             "air_date": f"20{10 + no}-01-{i:02d}"} for i in range(1, n + 1)]}
+
+    def test_danh_so_lai_lien_tuc(self):
+        rows = tmdb.concat_seasons_rows(
+            7, [self._season(1, 3), self._season(2, 2)], 5)
+        self.assertEqual([r["number"] for r in rows], [1, 2, 3, 4, 5])
+        self.assertEqual(rows[0]["title"], "T1-1")
+        self.assertEqual(rows[4]["title"], "T2-2")
+        self.assertEqual(rows[0]["anime_id"], 7)
+        self.assertIn("airing_at", rows[0])
+
+    def test_nhieu_hon_tong_thi_khong_ghi(self):
+        self.assertEqual(
+            tmdb.concat_seasons_rows(7, [self._season(1, 3), self._season(2, 3)], 5),
+            [])
+
+    def test_it_hon_tong_thi_khong_ghi(self):
+        self.assertEqual(
+            tmdb.concat_seasons_rows(7, [self._season(1, 3), self._season(2, 1)], 5),
+            [])

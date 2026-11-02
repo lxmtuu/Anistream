@@ -844,3 +844,20 @@ class TestForceQuaHan(unittest.TestCase):
         self._run(db, force=True)
         real = [p for p in db.patched if "tmdb_checked_at" not in p[2]]
         self.assertEqual(real[0][2].get("title_vi"), "Dược Sư Tự Sự")
+
+
+class TestGhepMuaTrongJob(unittest.TestCase):
+    """Job D phải ghép nhiều mùa TMDB khi một entry AniList trải qua nhiều mùa.
+
+    Không có bước này thì `fairy-tail` (AniList 175 tập, TMDB mùa 1 = 48 tập) chỉ
+    nhận 48 tập rồi dừng vĩnh viễn.
+    """
+
+    def test_ghep_2_mua_va_danh_so_lien_tuc(self):
+        db = FakeDB([dict(ROW, episodes_total=4)])
+        meta = {1: {"episode_count": 2}, 2: {"episode_count": 2}}
+        n, out = TestJobTmdb()._run(db, seasons=(1, 2), total=4, meta=meta)
+        ups = [u for u in db.upserted if u[0] == "episodes"]
+        self.assertEqual(len(ups), 1)
+        self.assertEqual([r["number"] for r in ups[0][1]], [1, 2, 3, 4])
+        self.assertIn("ghép 2 mùa", out)

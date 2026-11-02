@@ -609,6 +609,20 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                 # tách theo NĂM chiếu của entry AniList (xem
                 # `episode_rows_by_year`). Cần ngày chiếu nên quyết định ở dưới.
                 if no is None:
+                    # TMDB tách một entry AniList thành NHIỀU mùa (fairy-tail:
+                    # AniList 175 tập, TMDB mùa 1 = 48) ⇒ không mùa nào khớp
+                    # số tập, nhưng TỔNG các mùa liên tiếp thì khớp. Phải nhận
+                    # ở bước chọn mùa, nếu không `accept` từ chối ⇒ bộ bị coi
+                    # là "không xác định được mùa" và không bao giờ có tập.
+                    span = tmdb.seasons_span(
+                        det, hint_season, row.get("episodes_total"))
+                    if span:
+                        no = span[0]
+                        why_ = (f"ghép {len(span)} mùa TMDB "
+                                f"{span[0]}–{span[-1]} = "
+                                f"{row.get('episodes_total')} tập")
+                        sp = {"season": span[0], "offset": 0, "span": span}
+                if no is None:
                     yno = tmdb.merged_year_candidate(
                         det, hint_season, row.get("year"),
                         row.get("episodes_total"))
@@ -695,6 +709,25 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                     first_have.isdigit() and isinstance(row.get("year"), int)
                     and int(first_have) != int(row["year"]))
                 if refresh or not have or wrong_start or row.get("_can_sua"):
+                    # TMDB tách MỘT entry AniList thành NHIỀU mùa (fairy-tail:
+                    # AniList 175 tập, TMDB mùa 1 chỉ 48) ⇒ ghép các mùa liên
+                    # tiếp cộng đúng bằng tổng rồi đánh số 1..N. Phải thử TRƯỚC
+                    # nhánh "mùa trông như gộp", nếu không chỉ ghi được mùa đầu.
+                    span = tmdb.seasons_span(
+                        detail, season_no, row.get("episodes_total"))
+                    if span:
+                        seasons = [tmdb.fetch_season(best["id"], no_) for no_ in span]
+                        eps_span = tmdb.concat_seasons_rows(
+                            row["id"], seasons, row.get("episodes_total") or 0)
+                        if eps_span:
+                            DB.upsert("episodes", eps_span,
+                                      on_conflict="anime_id,number")
+                            eps_written += len(eps_span)
+                            print(f"      + {len(eps_span)} tập (ghép {len(span)} "
+                                  f"mùa TMDB {span[0]}–{span[-1]} của một entry "
+                                  f"AniList)")
+                            _mark_checked(DB, row)
+                            continue
                     season = tmdb.fetch_season(best["id"], season_no)
                     n_season = len([e for e in (season.get("episodes") or [])
                                     if isinstance(e.get("episode_number"), int)])
