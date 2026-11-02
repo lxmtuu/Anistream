@@ -790,7 +790,7 @@ python3 -m ingest.main coverage
 ```
 ▶ Job J — độ phủ nội dung (bộ nào xem được thật)
   · 163 bộ · 2028 tập metadata · 485 link
-  · 69 bộ CÓ video · 94 bộ chỉ có metadata (0 video) · 0 bộ trống hoàn toàn
+  · 30 bộ CÓ video · 94 bộ chỉ có metadata (0 video) · 39 bộ trống hoàn toàn
   · tập có video: 485/2028 (23.9%)
   ⚠ 94 bộ liệt kê tập nhưng KHÔNG có video nào …
 ```

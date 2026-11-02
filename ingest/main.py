@@ -1175,6 +1175,8 @@ def job_coverage(DB) -> int:
     vẫn mở được, vẫn liệt kê tập, nhưng bấm vào không có gì để xem.
 
     Chỉ ĐỌC và in. Trả về số bộ "có tập mà 0 video" để cron có thể theo dõi.
+    Số thật 02/11/2026: 163 bộ · 2028 tập · 485 link · **30 bộ có video** ·
+    **94 bộ chỉ metadata** · 39 bộ trống hoàn toàn.
     """
     print("\n▶ Job J — độ phủ nội dung (bộ nào xem được thật)")
     if DB.dry:
