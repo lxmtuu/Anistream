@@ -75,8 +75,32 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 | G' | `check` | **kiểm bất biến dữ liệu**, vi phạm cứng → job ĐỎ | hằng ngày |
 | — | `check` (cảnh báo mới) | tập **trùng ngày chiếu** (nghi đánh số lại) · bộ FINISHED **trang trống** | hằng ngày |
 | H | `reassign` | chuyển link bị gán **sai mùa** sang đúng mùa · `--move-all` dời cả playlist | chạy tay |
+| I | `publish` | **ẩn/hiện** bộ theo nội dung thật (`anime.is_published`) | hằng ngày |
 
-`all` = A + B + C + C' + D + D' + E + F + G. (`reassign` chạy tay — xem dưới.)
+`all` = A + B + C + C' + D + D' + E + F + I + G. (`reassign` chạy tay — xem dưới.)
+
+### Job I — ẩn bộ KHÔNG có nội dung khỏi danh sách
+
+Sau khi dời 148 link của HUNTER×HUNTER sang bộ 2011, bộ 1999 còn lại **0 tập,
+0 video** nhưng vẫn nằm trên trang chủ (`anime.is_published` mặc định `true`,
+không job nào đụng tới) ⇒ bấm vào là trang trắng. Đo 02/11/2026: **12 bộ** như
+vậy.
+
+Quy tắc (`_nen_hien`), tính LẠI từ dữ liệu mỗi lần chạy — không có cờ riêng:
+
+```
+hiện  ⇔  có ≥1 tập  HOẶC  có ≥1 link  HOẶC  status ≠ FINISHED
+```
+
+- Tự chữa lành: job C/C'/D ghi được tập ⇒ lần `publish` sau **bật lại**.
+- Vì sao dùng `is_published` chứ không sửa từng edge function: cột này đã được
+  **mọi** đường đọc lọc sẵn (`home`, `search`, `anime` phần liên quan, `push`,
+  `schedule`, view `v_anime_card`/`v_free_catalog`, RLS `catalog read`) → một
+  cột thay vì deploy 5 function.
+- **Không xoá dữ liệu**: metadata AniList vẫn đúng, deep link vẫn mở được trang
+  chi tiết (edge function `anime` không lọc `is_published`).
+- `patch` trả 1 kể cả khi PostgREST 204 khớp 0 dòng ⇒ job **đọc lại** bảng và
+  **NỔ** nếu trạng thái chưa đúng. Không tin HTTP 2xx.
 
 ### Job D'' — sửa NGAY một bộ, không chờ hết hạn `tmdb_checked_at`
 
