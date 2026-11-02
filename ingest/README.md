@@ -194,6 +194,18 @@ Luật này cũng chạy như **fallback cuối** khi season đã chọn có s�
 
 `explain` cũng đi qua luật này nên chẩn đoán và job luôn khớp nhau.
 
+### Job D — `gql()` đã bóc `data`, đừng bóc lần nữa (02/11/2026)
+
+Lần chạy 16:26 vẫn 0 tập. `airing_window` viết `data["data"]["Media"]` trong khi
+`anilist.gql()` **đã trả** `payload["data"]` ⇒ luôn nhận `{}` — không lỗi, không
+cảnh báo, mọi luật cắt-theo-khoảng-chiếu im lặng không chạy (job chạy 220s rồi
+báo xong).
+
+Nay `airing_window` đọc thẳng `data["Media"]`, có test riêng
+(`tests/test_anilist_window.py`) dùng `gql` giả trả đúng hình dạng thật. Thêm
+nữa: khi không lấy được `startDate`, job **in cảnh báo** kèm slug thay vì lặng
+lẽ bỏ qua.
+
 ### Job D — bộ "0 tập mãi" và lỗi cột thiếu (02/11/2026)
 
 Lần chạy `--refresh` 16:09 in "thành công" mà **không ghi gì**. Hai lỗi:

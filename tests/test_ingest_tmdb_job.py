@@ -341,6 +341,8 @@ class TestJobTmdb(unittest.TestCase):
                            window={})
         self.assertEqual([u for u in db.upserted if u[0] == "episodes"], [])
         self.assertIn("KHÔNG hợp", out)
+        self.assertIn("không có ngày chiếu AniList", out,
+                      "phải nói rõ luật bị bỏ qua, không im lặng")
 
     def test_cot_anilist_id_phai_duoc_select(self):
         """Lỗi thật 02/11/2026: `TMDB_COLS` thiếu `anilist_id` ⇒ `airing_window`
