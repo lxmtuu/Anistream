@@ -1116,6 +1116,79 @@ def job_jikan(DB, limit: int = 40, only_airing: bool = False,
 
 
 # ─────────────────────────────────────────────── Job G
+def _nen_hien(a: dict, co_tap: set, co_link: set) -> bool:
+    """Bộ này có nên xuất hiện trong danh sách (shelf, tìm kiếm, liên quan)?
+
+    Tại sao phải có: 12 bộ đã chiếu xong mà **0 tập, 0 video** (đo 02/11/2026)
+    vẫn nằm trên trang chủ vì `anime.is_published` mặc định `true`. Bấm vào là
+    một trang trắng — đúng thứ người dùng phàn nàn. Không xoá dữ liệu (metadata
+    AniList vẫn hợp lệ, deep link vẫn mở được), chỉ **ẩn khỏi danh sách**.
+
+    Quy tắc tính LẠI từ dữ liệu, không dùng cờ riêng ⇒ tự hiện lại ngay khi có
+    tập/link (job C/C'/D ghi xong là lần chạy `publish` kế tiếp bật lại).
+    """
+    if a.get("id") in co_tap or a.get("id") in co_link:
+        return True
+    # Chưa chiếu xong thì còn chờ tập → vẫn cho hiện (mùa này/sắp chiếu).
+    return a.get("status") != "FINISHED"
+
+
+def job_publish(DB) -> int:
+    """Bật/tắt `anime.is_published` theo quy tắc `_nen_hien`.
+
+    Vì sao dùng `is_published` chứ không sửa từng edge function: cột này đã được
+    **mọi** đường đọc lọc sẵn — `home`, `search`, `anime` (phần liên quan),
+    `push`, `schedule`, view `v_anime_card`/`v_free_catalog` và cả RLS
+    "catalog read". Một cột, không phải deploy 5 function.
+    """
+    print("\n▶ Job I — ẩn/hiện bộ theo NỘI DUNG thật (anime.is_published)")
+    if DB.dry:
+        print("  [dry-run] cần Supabase để đọc dữ liệu → bỏ qua")
+        return 0
+    anime = DB.select_all(
+        "anime", "select=id,slug,status,episodes_total,is_published")
+    co_tap = {e.get("anime_id") for e in DB.select_all("episodes", "select=anime_id")}
+    co_link = {l.get("anime_id") for l in
+               DB.select_all("streaming_links", "select=anime_id")}
+
+    an, hien = [], []
+    for a in anime:
+        nen = _nen_hien(a, co_tap, co_link)
+        if nen and not a.get("is_published"):
+            hien.append(a.get("slug"))
+        elif not nen and a.get("is_published"):
+            an.append(a.get("slug"))
+
+    for a in anime:
+        if not _nen_hien(a, co_tap, co_link) and a.get("is_published"):
+            DB.patch("anime", {"id": a["id"]}, {"is_published": False})
+    for a in anime:
+        if _nen_hien(a, co_tap, co_link) and not a.get("is_published"):
+            DB.patch("anime", {"id": a["id"]}, {"is_published": True})
+
+    # `patch` trả 1 kể cả khi khớp 0 dòng (PostgREST 204) ⇒ phải ĐỌC LẠI.
+    # Đây đúng là cái bẫy đã làm `delete` báo sai trước đây.
+    sau = {r["id"]: r.get("is_published")
+           for r in DB.select_all("anime", "select=id,is_published")}
+    sai = [a.get("slug") for a in anime
+           if sau.get(a["id"]) != _nen_hien(a, co_tap, co_link)]
+    if sai:
+        raise RuntimeError(
+            f"{len(sai)} bộ vẫn sai trạng thái is_published sau khi ghi "
+            f"(VD: {', '.join(sai[:5])}) — ghi không ăn, đừng coi là xong")
+
+    if an:
+        print(f"  · ẩn {len(an)} bộ đã chiếu xong mà 0 tập/0 video: "
+              f"{', '.join(an[:6])}{' …' if len(an) > 6 else ''}")
+    if hien:
+        print(f"  · hiện lại {len(hien)} bộ đã có nội dung: "
+              f"{', '.join(hien[:6])}{' …' if len(hien) > 6 else ''}")
+    if not an and not hien:
+        print("  ✓ mọi bộ đang đúng trạng thái hiển thị")
+    print(f"  ✓ còn {sum(1 for a in anime if sau.get(a['id']))} bộ hiển thị")
+    return len(an) + len(hien)
+
+
 def job_check(DB, strict: bool = True):
     """Kiểm bất biến dữ liệu sau khi ingest (xem `ingest/qa.py`).
 
@@ -1144,7 +1217,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="AniStream ingest worker")
     ap.add_argument("command", choices=["schedule", "catalog", "youtube", "tmdb",
                                         "seasons", "jikan", "episodes",
-                                        "check", "add", "all"])
+                                        "check", "add", "publish", "all"])
     ap.add_argument("--hours", type=int, default=26)
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--limit", type=int, default=25, help="số video mỗi kênh")
@@ -1219,6 +1292,8 @@ def main(argv=None):
                 print("\n✗ thiếu --anilist <id> (VD: --anilist 11061)")
                 return 2
             total += job_add(DB, args.anilist)
+        if args.command == "publish":
+            total += job_publish(DB)
         if args.command == "check":
             total += job_check(DB, strict=not args.no_strict)
         if args.command == "all":
@@ -1234,6 +1309,7 @@ def main(argv=None):
             total += job_seasons(DB, args.limit_seasons)
             total += job_jikan(DB, args.limit_jikan, fill_gaps=True)
             total += job_link_episodes(DB)
+            total += job_publish(DB)
             total += job_check(DB, strict=not args.no_strict)
     except KeyboardInterrupt:
         print("\n… dừng theo yêu cầu")
