@@ -68,6 +68,7 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 | C' | `episodes` | **link official → `episodes`** | 6 giờ + hằng ngày |
 | D | `tmdb` | TMDB: tiếng Việt + tập | hằng ngày |
 | D' | `tmdb --refresh` | TMDB: **tập MỚI** của bộ đang chiếu | hằng ngày |
+| D'' | `tmdb --only-slug <slug>` | TMDB: **đúng bộ được chỉ định**, bỏ qua hạn "đã hỏi" | chạy tay |
 | E | `seasons` | AniList `relations` → **mùa thiếu** (SEQUEL + PREQUEL) | hằng ngày |
 | F | `jikan` | Jikan/MAL → lấp tập còn thiếu (`--fill-gaps`: cả bộ thiếu vài tập) | hằng ngày |
 | G | `add --anilist <id>` | **thêm đúng 1 bộ** từ AniList (bộ job khác không gặp) | chạy tay |
@@ -76,6 +77,24 @@ Lấy key (miễn phí, 1 phút): themoviedb.org → Settings → API → **API 
 | H | `reassign` | chuyển link bị gán **sai mùa** sang đúng mùa · `--move-all` dời cả playlist | chạy tay |
 
 `all` = A + B + C + C' + D + D' + E + F + G. (`reassign` chạy tay — xem dưới.)
+
+### Job D'' — sửa NGAY một bộ, không chờ hết hạn `tmdb_checked_at`
+
+Job D bỏ qua bộ vừa hỏi TMDB trong 1 ngày (đang chiếu) / 7 ngày (còn lại) để
+không quét lại 792 giây cho 0 bản ghi. Hệ quả: vừa vá dữ liệu một bộ mà muốn
+job D xử lý lại **ngay** thì trước đây không có cách nào ngoài sửa tay cột
+`tmdb_checked_at` trong DB.
+
+```bash
+python3 -m ingest.main tmdb --only-slug kusuriya-no-hitorigoto-2nd-season
+python3 -m ingest.main tmdb --only-slug a,b,c        # nhiều slug, cách nhau dấu phẩy
+```
+
+- Bỏ **toàn bộ** lọc (`title_vi.is.null`, `status=eq.RELEASING`, hạn đã hỏi,
+  view `anime_thieu_tap`) — chỉ đúng các slug đó.
+- Slug không có trong bảng `anime` → **NỔ** kèm gợi ý `add --anilist <id>`,
+  không im lặng chạy 0 bộ.
+- Không truyền `--only-slug` → hành vi cũ giữ nguyên (có test canh).
 
 ### Job D: đọc MÙA từ tên bộ (`season_from_title`)
 

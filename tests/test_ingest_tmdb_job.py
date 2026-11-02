@@ -737,3 +737,75 @@ class TestThuUngVienKeTiepTrongJob(unittest.TestCase):
         self.assertEqual(len(eps_upserts), 1, "phải lấy được tập từ series thứ hai")
         self.assertEqual(len(eps_upserts[0][1]), 24)
         self.assertEqual(db.patched[0][2].get("tmdb_id"), 333686)
+
+
+class TestChiDinhSlug(unittest.TestCase):
+    """`tmdb --only-slug kusuriya`: sửa đúng một bộ NGAY.
+
+    Job D bỏ qua bộ vừa hỏi TMDB trong 1–7 ngày (`tmdb_checked_at`) để không
+    quét lại 792 giây cho 0 bản ghi. Nhưng khi người chạy vừa vá dữ liệu của
+    một bộ cụ thể thì phải xử lý được ngay, không phải chờ hết hạn — nếu không
+    cách duy nhất là sửa tay trong DB.
+    """
+
+    def _run(self, db, **kw):
+        with patch.object(tmdb, "is_configured", return_value=True), \
+             patch.object(tmdb, "match_anime", return_value=MATCH), \
+             patch.object(tmdb, "fetch_detail",
+                          side_effect=lambda tv: _detail(total=24)), \
+             patch.object(tmdb, "fetch_season", return_value={"episodes": []}):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                n = ingest_main.job_tmdb(db, **kw)
+        return n, buf.getvalue()
+
+    def test_bo_qua_loc_da_hoi_gan_day(self):
+        import datetime as dt
+        vua_hoi = dt.datetime.now(dt.timezone.utc).isoformat()
+        db = FakeDB([dict(ROW, tmdb_checked_at=vua_hoi)])
+        db.queries = []
+        _, out = self._run(db, only_slug="kusuriya")
+        q = " ".join(qq for t, qq in db.queries if t == "anime")
+        self.assertIn("slug=in.(kusuriya)", q)
+        self.assertNotIn("title_vi.is.null", q)
+        real = [p for p in db.patched if "tmdb_checked_at" not in p[2]]
+        self.assertEqual(len(real), 1, "vừa hỏi TMDB hôm nay vẫn phải xử lý")
+        self.assertIn("chỉ 1 slug", out)
+
+    def test_nhieu_slug_cach_nhau_dau_phay(self):
+        db = FakeDB([dict(ROW), dict(ROW, id=6, slug="khac")])
+        db.queries = []
+        _, out = self._run(db, only_slug="kusuriya, khac")
+        q = " ".join(qq for t, qq in db.queries if t == "anime")
+        self.assertIn("slug=in.(kusuriya,khac)", q)
+        self.assertIn("chỉ 2 slug", out)
+
+    def test_slug_khong_ton_tai_thi_no(self):
+        db = FakeDB([dict(ROW)])          # DB chỉ có "kusuriya"
+        with self.assertRaises(RuntimeError) as ctx:
+            self._run(db, only_slug="khong-co-that")
+        self.assertIn("khong-co-that", str(ctx.exception))
+        self.assertIn("add --anilist", str(ctx.exception))
+        self.assertEqual(db.patched, [], "không được ghi gì khi slug sai")
+
+    def test_cli_truyen_co_xuong_job(self):
+        db = FakeDB([dict(ROW)])
+        calls = []
+
+        def fake(db_, limit, with_episodes=True, refresh=False, only_slug=""):
+            calls.append(only_slug)
+            return 0
+
+        with patch.object(ingest_main, "job_tmdb", side_effect=fake), \
+             patch.object(ingest_main.dbmod, "DB", return_value=db), \
+             redirect_stdout(io.StringIO()):
+            ingest_main.main(["tmdb", "--only-slug", "kusuriya"])
+        self.assertEqual(calls, ["kusuriya"], "--only-slug phải tới được job D")
+
+    def test_mac_dinh_van_loc_da_hoi(self):
+        """Không có --only-slug → giữ nguyên hành vi cũ (bỏ qua bộ vừa hỏi)."""
+        import datetime as dt
+        vua_hoi = dt.datetime.now(dt.timezone.utc).isoformat()
+        db = FakeDB([dict(ROW, tmdb_checked_at=vua_hoi)])
+        self._run(db)
+        self.assertEqual(db.patched, [])
