@@ -510,11 +510,27 @@ class TestJobTmdbRefresh(unittest.TestCase):
         self.assertIn("status=eq.RELEASING", q)
         self.assertNotIn("title_vi.is.null", q, "refresh không được lọc theo trường thiếu")
 
-    def test_da_co_tap_van_lay_va_dem_tap_MOI(self):
+    def test_da_du_tap_thi_khong_lay_them(self):
+        """ĐỦ tổng số tập rồi thì enrich không đụng lại (khỏi tốn request)."""
         db = FakeDB([dict(ROW, episodes_total=12)],
-                    existing_episodes={5: [{"number": 1}, {"number": 2}]})
-        self._run(db)                       # chế độ enrich: có tập → bỏ qua
+                    existing_episodes={5: [{"number": n} for n in range(1, 13)]})
+        self._run(db)
         self.assertEqual([u for u in db.upserted if u[0] == "episodes"], [])
+
+    def test_thieu_tap_thi_enrich_van_lap(self):
+        """HỒI QUY 02/11/2026 — lỗi làm `fairy-tail` kẹt 114/175.
+
+        Điều kiện cũ chỉ đi lấy tập khi bảng episodes TRỐNG. Bộ đã có *một phần*
+        tập (114/175) thì bị bỏ qua vĩnh viễn: `tmdb --force` chạy xong, ghi
+        mốc `tmdb_checked_at` mới, `ingest_runs` báo 220 dòng — nhưng bảng
+        `episodes` của bộ KHÔNG đổi một dòng nào.
+        """
+        db = FakeDB([dict(ROW, episodes_total=4)],   # ROW: year 2023, 4 tập
+                    existing_episodes={5: [{"number": 1, "airing_at": "2023-10-01"}]})
+        self._run(db)
+        ups = [u for u in db.upserted if u[0] == "episodes"]
+        self.assertEqual(len(ups), 1, "1/4 tập ⇒ vẫn phải đi lấy phần thiếu")
+        self.assertIn(2, [r["number"] for r in ups[0][1]])
 
         db2 = FakeDB([dict(ROW, episodes_total=12)],
                      existing_episodes={5: [{"number": 1}, {"number": 2}]})

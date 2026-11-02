@@ -691,17 +691,19 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
             # (Trước đây còn đòi `episodes_total is null` → bộ nào AniList đã biết
             #  tổng số tập thì KHÔNG BAO GIỜ có danh sách tập. Đó là lỗi.)
             if with_episodes and matched:
-                if refresh:
-                    # Đang chiếu → mỗi lần chạy phải lấy lại danh sách để bắt tập mới
-                    have = DB.select(
-                        "episodes", f"select=number&anime_id=eq.{row['id']}&limit=600")
-                    existing = {e.get("number") for e in have}
-                else:
-                    have = DB.select(
-                        "episodes",
-                        f"select=number,airing_at&anime_id=eq.{row['id']}"
-                        "&order=airing_at.asc&limit=1")
-                    existing = set()
+                # Luôn đọc ĐỦ số tập đang có (không chỉ `limit=1`): cần biết bộ
+                # có 114/175 tập để còn đi lấy phần thiếu (xem `thieu_tap`).
+                have = DB.select(
+                    "episodes",
+                    f"select=number,airing_at&anime_id=eq.{row['id']}"
+                    "&order=airing_at.asc.nullslast&limit=600")
+                existing = {e.get("number") for e in have}
+                # Bộ ĐÃ CÓ TẬP nhưng ÍT hơn `episodes_total` — điều kiện cũ chỉ
+                # đòi bảng TRỐNG, nên `fairy-tail` kẹt 114/175 vĩnh viễn dù TMDB
+                # đủ dữ liệu (đo 02/11/2026: chạy `tmdb --force` ghi 0 tập).
+                _tong = row.get("episodes_total") or 0
+                thieu_tap = bool(_tong) and len(
+                    [n for n in existing if isinstance(n, int) and n > 0]) < _tong
                 # Tập đã có nhưng bắt đầu ở NĂM KHÁC năm của entry ⇒ dữ liệu cũ
                 # lấy từ season gộp (tensei-…-3rd-season: 2026 nhưng tập từ
                 # 2024). Vẫn phải xử lý lại, không được coi là "đã có tập".
@@ -709,7 +711,8 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
                 wrong_start = (
                     first_have.isdigit() and isinstance(row.get("year"), int)
                     and int(first_have) != int(row["year"]))
-                if refresh or not have or wrong_start or row.get("_can_sua"):
+                if (refresh or not have or wrong_start or thieu_tap
+                        or row.get("_can_sua")):
                     # TMDB tách MỘT entry AniList thành NHIỀU mùa (fairy-tail:
                     # AniList 175 tập, TMDB mùa 1 chỉ 48) ⇒ ghép các mùa liên
                     # tiếp cộng đúng bằng tổng rồi đánh số 1..N. Phải thử TRƯỚC
@@ -1217,7 +1220,24 @@ def job_coverage(DB) -> int:
             print(f"      - {a.get('slug')}  "
                   f"({len(eps_by.get(a['id'], ()))} tập, "
                   f"tổng {a.get('episodes_total') or '?'})")
-    return len(chi_metadata)
+
+    # Bộ có video nhưng THIẾU tập — khác hẳn "0 video". Thiếu loại này thì dễ
+    # tưởng đã xong: `shangri-la-frontier` 4/25, `dark-gathering` 3/25.
+    thieu_video = []
+    for a in anime:
+        co = len(link_eps.get(a["id"], ()))
+        can = len(eps_by.get(a["id"], ()))
+        if co and can and co < can:
+            thieu_video.append((a, can - co))
+    thieu_video.sort(key=lambda x: -x[1])
+    if thieu_video:
+        tong_thieu = sum(n for _, n in thieu_video)
+        print(f"  ⚠ {len(thieu_video)} bộ CÓ video nhưng thiếu {tong_thieu} tập "
+              f"(nguồn chưa đăng đủ → chạy lại job C `--deep`):")
+        for a, n in thieu_video[:8]:
+            print(f"      - {a.get('slug')}  thiếu {n} tập "
+                  f"({len(link_eps.get(a['id'], ()))}/{len(eps_by.get(a['id'], ()))})")
+    return len(chi_metadata) + len(thieu_video)
 
 
 def _nen_hien(a: dict, co_tap: set, co_link: set) -> bool:

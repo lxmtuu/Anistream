@@ -200,6 +200,32 @@ python3 -m ingest.main tmdb --only-slug a,b,c        # nhiều slug, cách nhau 
   không im lặng chạy 0 bộ.
 - Không truyền `--only-slug` → hành vi cũ giữ nguyên (có test canh).
 
+### Job D — bộ ĐÃ CÓ TẬP nhưng THIẾU thì vẫn phải lấp (lỗi 02/11/2026)
+
+Đây là lỗi khiến `fairy-tail` kẹt **114/175 tập** mãi mãi, và nó **không** bị phát
+hiện bằng log: job in `✓ 220 anime được bổ sung`, ghi `tmdb_checked_at` mới,
+`ingest_runs` có dòng `tmdb/enrich rows=220` — nhưng bảng `episodes` không đổi một
+dòng nào.
+
+Nguyên nhân: điều kiện cũ chỉ đi lấy danh sách tập khi bảng `episodes` **TRỐNG**
+(`if not have`) hoặc tập đầu tiên lệch năm. Bộ đã có *một phần* tập thì bị coi là
+"đã xong" ⇒ phần thiếu không bao giờ được lấp, chạy `--force` cũng vô ích.
+
+Nay điều kiện là: `refresh ∨ bảng trống ∨ lệch năm ∨ số tập hiện có < episodes_total`.
+
+Hệ quả cần biết: job D giờ **ghi thêm** tập cho bộ đang thiếu. Đây là điều mong
+muốn (upsert theo `(anime_id, number)` nên tập cũ không bị nhân đôi), nhưng nếu
+`episodes_total` sai thì job sẽ cố lấp tới số sai đó — vì vậy `check` vẫn giữ luật
+"không tập nào vượt `episodes_total`" và `coverage` báo riêng nhóm *có video nhưng
+thiếu tập*.
+
+Kiểm nhanh một bộ:
+
+```bash
+python3 -m ingest.main tmdb --only-slug fairy-tail --force
+# kỳ vọng: "+ 175 tập (ghép 3 mùa TMDB 1–3 của một entry AniList)"
+```
+
 ### Job D: đọc MÙA từ tên bộ (`season_from_title`)
 
 AniList tách mỗi mùa thành entry riêng ("Kusuriya no Hitorigoto 2nd Season"), TMDB
