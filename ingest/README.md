@@ -408,6 +408,21 @@ python3 -m ingest.reassign --move-all --from hunter-hunter \
 python3 -m ingest.main check
 ```
 
+### Job H'' — `--move-over`: chỉ phần VƯỢT TỔNG là bộ khác (OVA/OAD)
+
+Ca `uq-holder-mahou-sensei-negima-2` (02/11/2026): TV **12 tập**, nhưng Muse đánh
+số tiếp 13–15 cho **3 OAD** ("Amor Primus", "Eternal First Kiss", "Karin-senpai no
+Ienai Himitsu"). AniList để OAD ở entry riêng "UQ HOLDER! OVA" (AniList 98999,
+3 tập) ⇒ 3 video vượt tổng, không ai xem được.
+
+```bash
+python3 -m ingest.main add --anilist 98999        # "UQ HOLDER! OVA", 3 tập
+python3 -m ingest.reassign --move-over --from uq-holder-mahou-sensei-negima-2 \
+        --to-anilist 98999 --apply
+```
+
+Ở đây **có** đánh số lại: `offset = episodes_total` của nguồn (13−12 = 1 … 15−12 = 3).
+
 Kiểm **hết** rồi mới ghi (sai một điều là bỏ toàn bộ): cả hai bộ phải tồn tại;
 đích có `episodes_total` ≥ số tập lớn nhất của nguồn; đích **chưa có link** (không
 trộn hai nguồn); nguồn phải có ít nhất 1 link. Sau khi dời, tập của nguồn do

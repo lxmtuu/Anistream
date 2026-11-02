@@ -119,3 +119,52 @@ class TestMoveAll(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMoveOver(unittest.TestCase):
+    """Dời phần VƯỢT TỔNG (OVA/OAD bị đánh số tiếp) — ca UQ Holder 02/11/2026.
+
+    TV 12 tập; Muse đánh tiếp 13–15 cho 3 OAD. AniList để OAD ở entry riêng
+    ("UQ HOLDER! OVA", 3 tập) ⇒ dời 13–15 → 1–3 của entry đó.
+    """
+
+    def _db(self, n=15, ova_total=3, ova_busy=False):
+        links = [{"id": i, "anime_id": 304, "episode_number": i}
+                 for i in range(1, n + 1)]
+        if ova_busy:
+            links.append({"id": 777, "anime_id": 305, "episode_number": 1})
+        return FakeDB([{"id": 304, "slug": "uq-holder", "episodes_total": 12},
+                       {"id": 305, "slug": "uq-holder-ova",
+                        "episodes_total": ova_total}], links)
+
+    def test_dry_run_khong_ghi(self):
+        db = self._db()
+        self.assertEqual(reassign.move_over(db, "uq-holder", "uq-holder-ova"), 0)
+        self.assertEqual(db.patched, [])
+
+    def test_doi_3_link_va_danh_so_lai(self):
+        db = self._db()
+        n = reassign.move_over(db, "uq-holder", "uq-holder-ova", dry=False)
+        self.assertEqual(n, 3)
+        moved = sorted(p[2]["episode_number"] for p in db.patched)
+        self.assertEqual(moved, [1, 2, 3])
+        self.assertTrue(all(p[2]["anime_id"] == 305 for p in db.patched))
+        self.assertEqual([e["number"] for e in db.upserted[0][1]], [1, 2, 3])
+
+    def test_khong_co_link_vuot_thi_khong_lam_gi(self):
+        db = self._db(n=12)
+        self.assertEqual(reassign.move_over(db, "uq-holder", "uq-holder-ova",
+                                            dry=False), 0)
+        self.assertEqual(db.patched, [])
+
+    def test_dich_thieu_tap_thi_tu_choi(self):
+        db = self._db(ova_total=2)
+        with self.assertRaises(RuntimeError) as e:
+            reassign.move_over(db, "uq-holder", "uq-holder-ova", dry=False)
+        self.assertIn("không nhận nổi", str(e.exception))
+
+    def test_dich_da_co_link_trung_so_thi_tu_choi(self):
+        db = self._db(ova_busy=True)
+        with self.assertRaises(RuntimeError) as e:
+            reassign.move_over(db, "uq-holder", "uq-holder-ova", dry=False)
+        self.assertIn("trùng số", str(e.exception))
