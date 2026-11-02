@@ -315,6 +315,38 @@ def extract_vietnamese(detail: Dict[str, Any]) -> Tuple[Optional[str], Optional[
     return name or None, overview or None
 
 
+# Tên Việt lấy từ TMDB là tên của CẢ SERIES, không phải của mùa. Đo 02/11/2026:
+# 18 cặp bộ/mùa trùng y nguyên title_vi ("Thánh Phồng Tôm" cho cả One-Punch Man
+# mùa 1 và mùa 2) ⇒ trong tìm kiếm có 2 thẻ không phân biệt được.
+_SEASON_IN_TITLE = re.compile(
+    r"(?:ph\u1ea7n|phan|m\u00f9a|mua|season|ss)\s*\d+"
+    r"|\u7b2c\s*\d+\s*(?:\u671f|\u30b7\u30fc\u30ba\u30f3)",
+    re.IGNORECASE,
+)
+
+
+def _bo_nhan_mua(title: str) -> str:
+    """Bỏ hậu tố "(Phần N)" ở cuối tên — để biết tên cũ có phải bản TRẦN không."""
+    return re.sub(r"\s*\(Ph\u1ea7n\s*\d+\)\s*$", "", (title or "").strip())
+
+
+def with_season_label(title_vi: Optional[str],
+                      season_no: Optional[int]) -> Optional[str]:
+    """Gắn "(Phần N)" vào tên Việt của mùa thứ 2 trở đi (nếu chưa có).
+
+    Không bịa tên — chỉ thêm hậu tố mùa vào đúng tên TMDB đã trả. Mùa 1 giữ
+    nguyên. Tên đã ghi "Phần 2"/"Season 2" thì không thêm lần nữa.
+    """
+    t = (title_vi or "").strip()
+    if not t:
+        return None                  # chuỗi rỗng cũng coi như không có tên
+    if not isinstance(season_no, int) or season_no < 2:
+        return title_vi
+    if _SEASON_IN_TITLE.search(t):
+        return title_vi
+    return f"{t} (Phần {season_no})"
+
+
 # ─────────────────────────────────────────── ghép kết quả thành patch DB
 def build_anime_patch(
     row: Dict[str, Any],
@@ -330,7 +362,12 @@ def build_anime_patch(
     if not row.get("tmdb_id"):
         patch["tmdb_id"] = detail.get("id")
 
-    if not (row.get("title_vi") or "").strip() and title_vi:
+    cu = (row.get("title_vi") or "").strip()
+    if not cu and title_vi:
+        patch["title_vi"] = title_vi
+    elif cu and title_vi and cu != title_vi and cu == _bo_nhan_mua(title_vi):
+        # Tên cũ là tên TRẦN (chưa có "(Phần N)") của chính tên mới ⇒ nâng cấp.
+        # Chỉ đúng trường hợp này: không bao giờ ghi đè một bản dịch khác.
         patch["title_vi"] = title_vi
 
     if not (row.get("synopsis_vi") or "").strip() and overview_vi:

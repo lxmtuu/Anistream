@@ -639,6 +639,12 @@ def job_tmdb(DB, limit: int = 60, with_episodes: bool = True,
             detail = detail_of(best["id"])
             title_vi, overview_vi = tmdb.extract_vietnamese(detail)
             season_no, why, split = season_for(best["id"])
+            # TMDB trả tên Việt của CẢ series ⇒ mùa 2, 3 sẽ trùng tên mùa 1
+            # (đo 02/11/2026: 18 cặp). Gắn "(Phần N)" để tìm kiếm phân biệt được.
+            # Số mùa lấy từ TÊN bộ trước (`hint_season`), chỉ khi tên không ghi
+            # mùa mới dùng mùa TMDB khớp được.
+            title_vi = tmdb.with_season_label(
+                title_vi, hint_season if isinstance(hint_season, int) else season_no)
             matched = season_no is not None
 
             hint = None
