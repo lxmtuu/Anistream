@@ -893,6 +893,45 @@ Tên tiếng Trung không search được trên AniList → thêm vào `aliases.
 Đây là **phần biên tập tạo giá trị riêng** của app (không đối thủ nào có danh mục này bằng tiếng Việt).
 Mẹo tìm ID: `python3 -m ingest.main` chỉ log tên, tìm trên https://anilist.co rồi lấy số trong URL.
 
+## Bảng `ingest_unmatched` — tên chưa khớp không còn nằm trong log (03/11/2026)
+
+Job C chỉ `print` danh sách "tên series chưa khớp". Đo 02/11/2026: 163 bộ / 2028
+tập metadata nhưng **chỉ 30 bộ có video**; `youtube --deep` ghi `rows=293` mà tổng
+link **không đổi** (293 dòng đều là upsert đè lên link cũ). Câu hỏi cần trả lời —
+*"Muse VN không có bộ đó"* hay *"hỏng ghép tên"* — không trả lời được, vì danh
+sách chỉ tồn tại trong terminal của một lần chạy.
+
+Nay job C ghi mỗi tên vào bảng `ingest_unmatched` (migration
+`db/migrations/20261103_ingest_unmatched.sql`):
+
+| cột | nghĩa |
+|---|---|
+| `series_name` | tên lấy từ tiêu đề video |
+| `kind` | `unmatched` (không ghép được bộ nào) · `review` (ghép được nhưng số tập **vượt** tổng ⇒ cố ý không ghi) |
+| `videos` | số video thuộc tên đó |
+| `first_seen_at` / `last_seen_at` | lần đầu / lần cuối gặp |
+
+Cuối mỗi lần chạy, job C **xoá** những tên đã khớp (`last_seen_at` cũ hơn mốc bắt
+đầu chạy) ⇒ bảng luôn là ảnh chụp hiện tại, không phải lịch sử tích luỹ.
+
+```bash
+python3 -m ingest.main unmatched      # xem tên chưa khớp, sắp theo số video
+```
+
+```
+▶ Job C'' — tên video CHƯA ghép được (ingest_unmatched)
+  · 37 tên chưa khớp · 2 tên vượt tổng số tập
+  ⚠ 412 video thuộc 37 series KHÔNG vào được DB (thiếu alias):
+      - Bộ Lạ A  (25 video, kênh muse_vn)
+```
+
+Quy trình: xem danh sách → tên nào là bộ có thật trên Muse VN thì thêm vào
+`ingest/aliases.json` (map sang AniList ID) → chạy lại job C. Tên nào là bộ
+**không có** trên kênh thì để nguyên, không phải lỗi.
+
+Hỏng phần chẩn đoán **không** làm chết job: link đã ghi xong trước khi gọi
+`_luu_chua_khop`, và lỗi ở đây chỉ in cảnh báo (`tests/test_ingest_unmatched.py`).
+
 ## Lỗi console Windows: `UnicodeEncodeError: 'charmap'` (03/11/2026)
 
 Chạy trên Git Bash (Windows) mà **ống ra** (pipe) là job chết ngay dòng tiêu đề:
