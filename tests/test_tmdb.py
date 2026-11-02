@@ -486,3 +486,74 @@ class TestBaseTitle(unittest.TestCase):
             best, score, how = tmdb.match_anime(row)
         self.assertIsNotNone(best, how)
         self.assertIn("One-Punch Man", how)
+
+
+class TestCatBotTapMuaDau(unittest.TestCase):
+    """TMDB gộp 2 mùa/2 cour vào MỘT mùa → nhiều tập hơn AniList.
+
+    Đo 02/11/2026: 9 bộ bị bỏ trống danh sách tập vì lý do này — `Blue Box`
+    (TMDB 37 > AniList 25), `You and I Are Polar Opposites` (25 > 12), `The
+    Ramparts of Ice` (28 > 14), `A Wild Last Boss Appeared!` (24 > 12)…
+    Với entry MÙA ĐẦU thì tập 1..N vẫn đúng → cắt phần dư là an toàn.
+    """
+
+    def _d(self, count, air="2025-01-10", extra=None):
+        seasons = [{"season_number": 1, "episode_count": count, "air_date": air}]
+        if extra:
+            seasons.append(extra)
+        return {"seasons": seasons}
+
+    def test_cat_khi_la_mua_dau_va_gap_doi(self):
+        self.assertEqual(tmdb.first_season_cut(self._d(37), 1, None, 2025, 25), 25)
+        self.assertEqual(tmdb.first_season_cut(self._d(24), 1, None, 2025, 12), 12)
+
+    def test_khong_cat_khi_la_mua_sau(self):
+        d = self._d(12, extra={"season_number": 2, "episode_count": 12,
+                               "air_date": "2026-01-10"})
+        self.assertIsNone(tmdb.first_season_cut(d, 2, None, 2026, 12))
+
+    def test_khong_cat_khi_ten_ghi_mua(self):
+        self.assertIsNone(tmdb.first_season_cut(self._d(24), 1, 2, 2025, 12))
+
+    def test_khong_cat_khi_nam_lech(self):
+        self.assertIsNone(tmdb.first_season_cut(self._d(24, "2015-01-10"),
+                                                1, None, 2019, 12))
+
+    def test_khong_cat_khi_nhieu_hon_gap_doi(self):
+        """Fool Night: AniList 3 vs TMDB 12 (4×) → nghi lấy nhầm series."""
+        self.assertIsNone(tmdb.first_season_cut(self._d(12), 1, None, 2026, 3))
+
+    def test_episode_rows_cat_dung_so(self):
+        season = {"episodes": [
+            {"episode_number": i, "air_date": "2025-01-0%d" % (i % 9 + 1),
+             "name": f"T{i}"} for i in range(1, 13)]}
+        rows = tmdb.episode_rows(7, season, True, max_number=5)
+        self.assertEqual([r["number"] for r in rows], [1, 2, 3, 4, 5])
+
+
+class TestExplain(unittest.TestCase):
+    """`python3 -m ingest.tmdb --slug …` — in TMDB trả gì để chẩn đoán."""
+
+    def test_in_du_ten_nam_diem_va_danh_dau_loai(self):
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        row = {"slug": "the-ramparts-of-ice-season-2",
+               "title_english": "The Ramparts of Ice Season 2",
+               "title_romaji": "Koori no Jouheki 2nd Season",
+               "year": 2026, "episodes_total": 12, "tmdb_id": None}
+        res = [{"id": 283428, "name": "The Ramparts of Ice",
+                "original_name": "The Ramparts of Ice",
+                "first_air_date": "2026-01-10"},
+               {"id": 1, "name": "Hoàn toàn khác", "original_name": None,
+                "first_air_date": "1999-01-01"}]
+        with patch.object(tmdb, "_get", return_value={"results": res}), \
+                patch.object(tmdb.time, "sleep"):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                tmdb.explain(row)
+        out = buf.getvalue()
+        self.assertIn("The Ramparts of Ice Season 2", out)
+        self.assertIn("283428", out)
+        self.assertIn("✓", out)
+        self.assertIn("✗", out)

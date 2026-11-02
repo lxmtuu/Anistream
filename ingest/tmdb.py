@@ -271,10 +271,51 @@ def clean_episode_title(name: Optional[str]) -> Optional[str]:
     return t
 
 
+def first_season_cut(
+    detail: Dict[str, Any],
+    season_no: Optional[int],
+    season_hint: Optional[int],
+    year: Optional[int],
+    episodes_total: Optional[int],
+    season_count: Optional[int] = None,
+) -> Optional[int]:
+    """Có an toàn để **cắt bớt** danh sách tập của mùa này không? Trả số tập tối đa.
+
+    Ca thật 02/11/2026 — 9 bộ bị bỏ vì "TMDB 37 tập > AniList 25":
+    TMDB gộp cả series (hoặc 2 cour) vào MỘT mùa, còn AniList tách entry.
+    Với entry **mùa đầu** thì tập 1..N của TMDB đúng là tập 1..N của AniList,
+    nên cắt phần dư là an toàn.
+
+    Chỉ cho phép khi CHẮC đây là mùa đầu:
+      · tên bộ không ghi mùa (hint None/1);
+      · `season_no` là mùa nhỏ nhất của series;
+      · năm chiếu của mùa đó **trùng** năm AniList (bộ bắt đầu đúng năm đó);
+      · TMDB nhiều hơn **tối đa 2 lần** (2 mùa/2 cour gộp). Nhiều hơn hẳn —
+        Fool Night: AniList 3 vs TMDB 12 = 4× — là nghi lấy nhầm series.
+    Không thoả → trả None (thà để trống còn hơn gán tập mùa khác).
+    """
+    if not isinstance(episodes_total, int) or episodes_total <= 0:
+        return None
+    if season_hint not in (None, 1):
+        return None
+    seasons = season_candidates(detail)
+    if not seasons or season_no is None:
+        return None
+    if season_no != seasons[0]["number"]:
+        return None
+    if year and _year_of(seasons[0]["air_date"]) not in (None, int(year)):
+        return None
+    count = season_count if isinstance(season_count, int) else seasons[0].get("count")
+    if isinstance(count, int) and count > 2 * int(episodes_total) + 1:
+        return None
+    return int(episodes_total)
+
+
 def episode_rows(
     anime_id: int,
     season: Dict[str, Any],
     single_season: bool,
+    max_number: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Đổi season TMDB → rows cho bảng `episodes`. Bỏ qua nếu không đủ tin cậy."""
     if not single_season:
@@ -284,6 +325,8 @@ def episode_rows(
         num = e.get("episode_number")
         if not isinstance(num, int) or num <= 0:
             continue
+        if isinstance(max_number, int) and max_number > 0 and num > max_number:
+            continue                      # cắt phần dư (xem `first_season_cut`)
         air = e.get("air_date")
         if not air:
             continue                      # chưa có ngày chiếu → đừng bịa
@@ -556,3 +599,83 @@ def fetch_season(tv_id: int, season_number: int = 1) -> Dict[str, Any]:
     s = _get(f"/tv/{tv_id}/season/{season_number}")
     time.sleep(SLEEP_BETWEEN)
     return s
+
+
+# ─────────────────────────────────────────── soi 1 bộ (chạy tay)
+def explain(row: Dict[str, Any], limit: int = 5) -> int:
+    """In ra TMDB trả về GÌ cho 1 bộ — để chẩn đoán "không tìm được trên TMDB".
+
+    Không đoán: in đủ tên + năm + điểm của từng kết quả để người đọc tự thấy
+    vì sao bị loại (lệch tên? lệch năm? TMDB không có bộ đó?).
+    """
+    titles = [t for t in (row.get("title_english"), row.get("title_romaji"),
+                          row.get("title_native")) if t]
+    hint = season_from_title(*titles)
+    year_filter = None if (hint and hint > 1) else row.get("year")
+    print(f"\n▶ {row.get('slug') or row.get('title_romaji')}")
+    print(f"  tên : {titles}")
+    print(f"  năm : {row.get('year')} · mùa đoán từ tên: {hint} "
+          f"· lọc năm khi tìm: {year_filter}")
+    print(f"  tổng tập AniList: {row.get('episodes_total')} "
+          f"· tmdb_id: {row.get('tmdb_id')}")
+
+    queries: list = []
+    for t in titles:
+        if t not in queries:
+            queries.append(t)
+    for t in titles:
+        b = base_title(t)
+        if b and b not in queries:
+            queries.append(b)
+
+    for q in queries:
+        params: Dict[str, Any] = {"query": q}
+        if year_filter is not None:
+            params["first_air_date_year"] = year_filter
+        try:
+            res = _get("/search/tv", params).get("results") or []
+        except TmdbError as e:
+            print(f"\n  query {q!r} → LỖI: {e}")
+            continue
+        print(f"\n  query {q!r} → {len(res)} kết quả")
+        for r in res[:limit]:
+            sc = title_score(titles, r, year_filter)
+            ok = "✓" if sc >= TITLE_THRESHOLD else "✗"
+            print(f"    {ok} {sc:.3f}  {r.get('id')}  {r.get('name')!r} "
+                  f"({r.get('first_air_date') or '?'})")
+        if not res:
+            print("    (TMDB không trả gì cho chuỗi này — thử tên khác)")
+        time.sleep(SLEEP_BETWEEN)
+    return 0
+
+
+def main(argv=None) -> int:
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="Soi TMDB trả gì cho 1 bộ (chẩn đoán 'không tìm được trên TMDB')")
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--slug", help="slug trong DB, vd: the-ramparts-of-ice-season-2")
+    g.add_argument("--title", help='tên bất kỳ, vd: "Dandadan 2nd Season"')
+    ap.add_argument("--year", type=int, default=None, help="kèm --title")
+    ap.add_argument("--total", type=int, default=None,
+                    help="episodes_total, kèm --title")
+    args = ap.parse_args(argv)
+
+    if args.title:
+        row = {"slug": args.title, "title_romaji": args.title,
+               "year": args.year, "episodes_total": args.total}
+        return explain(row)
+
+    from . import db as dbmod
+    DB = dbmod.DB()
+    rows = DB.select("anime",
+                     "select=id,slug,title_romaji,title_english,title_native,"
+                     f"year,episodes_total,tmdb_id&slug=eq.{args.slug}&limit=1")
+    if not rows:
+        print(f"✗ không thấy anime slug={args.slug}")
+        return 2
+    return explain(rows[0])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

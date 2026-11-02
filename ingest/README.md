@@ -122,6 +122,35 @@ năm như cũ.
 `base_title` cắt: `… 2nd Season`, `… Season 2`, `… Mùa 2`, `… II`, `… 2` (số cuối).
 Không cắt gì thì trả `None` (không đoán: `Naruto` vẫn là `Naruto`).
 
+### Job D — "TMDB nhiều tập hơn AniList" thì cắt phần dư (02/11/2026)
+
+Lần chạy 13:20: **24 bộ được bổ sung · 137 tập**, còn 9 bộ bị bỏ với lý do
+`TMDB 37 tập > AniList 25`. Nguyên nhân: TMDB gộp 2 mùa / 2 cour vào **một**
+mùa, còn AniList tách entry. Với entry **mùa đầu** thì tập 1..N của TMDB đúng là
+tập 1..N của AniList → cắt phần dư là an toàn.
+
+`tmdb.first_season_cut()` chỉ cho phép cắt khi **cả 4 điều** đúng:
+
+1. tên bộ **không** ghi mùa (`hint` = None hoặc 1);
+2. `season_no` là mùa **nhỏ nhất** của series TMDB;
+3. năm chiếu của mùa đó **trùng** năm AniList;
+4. TMDB nhiều hơn **tối đa 2 lần** (2 mùa/2 cour gộp). Nhiều hơn hẳn — `Fool
+   Night`: AniList 3 vs TMDB 12 = 4× — là **nghi lấy nhầm series** → vẫn từ chối.
+
+Không thoả điều nào → hành vi cũ: **không ghi** và báo ra danh sách "KHÔNG hợp".
+
+### Job D — soi một bộ: `python3 -m ingest.tmdb`
+
+Khi log ghi "không tìm được trên TMDB" mà bạn tin là TMDB có, chạy:
+
+```bash
+python3 -m ingest.tmdb --slug the-ramparts-of-ice-season-2
+python3 -m ingest.tmdb --title "Dandadan 2nd Season" --year 2025 --total 12
+```
+
+Nó in **mọi** chuỗi đã tìm, số kết quả, và từng kết quả kèm `✓/✗` + điểm — đủ để
+biết bị loại vì lệch tên, lệch năm, hay TMDB thật sự không có bộ đó (không đoán).
+
 ### Job H — `reassign`: link bị gán sai mùa
 
 Muse đánh số tập **tiếp nối qua các mùa**: FAIRY TAIL đăng liên tục tập 1–277,
