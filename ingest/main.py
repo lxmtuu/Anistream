@@ -23,7 +23,8 @@ import sys
 import time
 from typing import Dict, List, Optional
 
-from . import anilist, config, db as dbmod, jikan, match, qa, tmdb, youtube
+from . import (anilist, config, db as dbmod, franchise, jikan, match, qa,
+               tmdb, youtube)
 
 
 # ─────────────────────────────────────────────── helpers
@@ -270,6 +271,87 @@ def _ten_ung_vien(v: Dict) -> List[tuple]:
     return out
 
 
+def _run_ranges(videos) -> Dict[str, tuple]:
+    """Khoảng số tập THẤY TRONG LẦN CHẠY NÀY cho từng tên series."""
+    out: Dict[str, tuple] = {}
+    for v in videos or []:
+        ep = int(v.get("episode") or 0)
+        if ep <= 0:
+            continue
+        ten = v.get("series") or ""
+        lo, hi = out.get(ten, (0, 0))
+        out[ten] = (ep if not lo else min(lo, ep), max(hi, ep))
+    return out
+
+
+def _gop_khoang(*ds) -> Dict[str, tuple]:
+    """Gộp nhiều bộ khoảng (bỏ số 0) — lấy min của lo, max của hi."""
+    out: Dict[str, tuple] = {}
+    for d in ds:
+        for ten, (lo, hi) in (d or {}).items():
+            a, b = out.get(ten, (0, 0))
+            out[ten] = (min(x for x in (a, lo) if x > 0) if (a or lo) else 0,
+                        max(b, hi))
+    return out
+
+
+def _khoang_tap(DB, channel: str) -> Dict[str, tuple]:
+    """Khoảng số tập ĐÃ THẤY (mọi lần chạy) cho từng tên series trên kênh."""
+    try:
+        rows = DB.select_all("youtube_series_range",
+                             f"select=series_name,ep_min,ep_max&channel=eq.{channel}")
+    except Exception:                       # noqa: BLE001 — bảng có thể chưa có
+        return {}
+    return {r["series_name"]: (int(r.get("ep_min") or 0), int(r.get("ep_max") or 0))
+            for r in rows if r.get("series_name")}
+
+
+def _ghi_khoang_tap(DB, channel: str, cu: Dict[str, tuple],
+                    moi: Dict[str, tuple]) -> int:
+    """Gộp khoảng mới vào khoảng cũ (min/max) rồi upsert — không làm hẹp lại."""
+    rows = []
+    for name, (lo, hi) in (moi or {}).items():
+        truoc = cu.get(name) or (0, 0)
+        lo2 = min(x for x in (lo, truoc[0]) if x > 0) if (lo or truoc[0]) else 0
+        hi2 = max(hi or 0, truoc[1] or 0)
+        if (lo2, hi2) != truoc:
+            rows.append({"channel": channel, "series_name": name,
+                         "ep_min": lo2, "ep_max": hi2})
+    if not rows:
+        return 0
+    for r in rows:
+        cu[r["series_name"]] = (r["ep_min"], r["ep_max"])
+    if DB.dry:
+        return len(rows)
+    DB.upsert("youtube_series_range", rows,
+              on_conflict="channel,series_name", fallback_per_row=True)
+    return len(rows)
+
+
+def _dinh_tuyen_tap(media: Dict, lo: int, hi: int, cache, memo: Dict) -> Optional[tuple]:
+    """Số tập của kênh → (entry AniList đúng, số tập cục bộ). None = không đổi.
+
+    Chỉ gọi khi khoảng quan sát VƯỢT số tập của entry đã ghép (`hi > tổng` hoặc
+    `lo > tổng`) — đó đúng là lúc nghi vấn "cộng dồn qua mùa" nảy sinh, và cũng
+    để không tốn request AniList cho các bộ một mùa bình thường.
+    """
+    mid = (media or {}).get("id")
+    tong = media.get("episodes")
+    if not mid:
+        return None
+    if isinstance(tong, int) and tong > 0 and lo > 1 and hi <= tong:
+        return None
+    key = f"{mid}:{lo}:{hi}"
+    if key in memo:
+        return memo[key]
+    try:
+        kq = franchise.plan(media, lo, hi, cache)
+    except Exception:                       # noqa: BLE001 — AniList lỗi ≠ job chết
+        kq = None
+    memo[key] = kq
+    return kq
+
+
 def _ghi_review(need_review: Dict[str, int], can_soat: Dict[str, str],
                 series: str, episode: int, total: int,
                 anime_id: Optional[int] = None,
@@ -296,8 +378,18 @@ def _ghi_review(need_review: Dict[str, int], can_soat: Dict[str, str],
         can_soat[f"anilist:{anilist_id}"] = series
 
 
-def _link_rows(DB, videos, cache, verbose=True, da_co_url=None):
-    """Ghép tên → anime rồi tạo rows `streaming_links`. Trả (matched, links, unmatched)."""
+def _link_rows(DB, videos, cache, verbose=True, da_co_url=None, rong=None,
+               da_co=None):
+    """Ghép tên → anime rồi tạo rows `streaming_links`.
+
+    `rong`: {tên series: (tập nhỏ nhất, lớn nhất)} đã thấy ở MỌI lần chạy — cần
+    cho việc định tuyến tập cộng dồn qua các mùa (`franchise.plan`). Không truyền
+    thì lấy khoảng của riêng lần chạy này.
+
+    `da_co`: {url: [anime_id, episode_number]} các link ĐÃ GHI. Truyền khi có, để
+    phát hiện link gắn SAI bộ/tập (ca thật: 12 tập Slime bị gắn vào "3rd Season"
+    trong khi chúng là tập mùa 1). Bỏ qua chỉ khi (bộ, tập) mới TRÙNG cái cũ.
+    """
     matched, unmatched, need_review = [], {}, {}
     can_soat: Dict[str, str] = {}      # "id:<anime_id>" | "anilist:<id>" → series
     da_co_url = da_co_url or set()
@@ -307,9 +399,49 @@ def _link_rows(DB, videos, cache, verbose=True, da_co_url=None):
     idx = _chi_muc_ten(DB)
     if idx and verbose:
         print(f"  · chỉ mục tên trong DB: {len(idx)} khoá")
+    id_theo_anilist = {}
+    for _ds in idx.values():
+        for _e in _ds:
+            id_theo_anilist[_e["anilist_id"]] = _e["anime_id"]
+    # Khoảng số tập: gộp khoảng các lần chạy trước với lần này (lần này có thể
+    # chỉ còn vài tập mới nhất vì RSS chỉ trả ~15 video/kênh).
+    rong = _gop_khoang(rong, _run_ranges(videos))
+    memo_dinh_tuyen: Dict[str, object] = {}
+    so_dinh_tuyen = {"fill": 0, "cumulative": 0}
+
+    def _da_giong(v: Dict, aid, ep: int) -> bool:
+        """Link cũ đã đúng (bộ, tập) này chưa? → khỏi ghi lại, khỏi báo lệch."""
+        cu = da_co.get(v.get("url")) if da_co else None
+        return bool(cu) and [aid, ep] == list(cu)
+
+    def _dinh_tuyen(media: Dict, v: Dict, aid):
+        """Đổi (entry, số tập) nếu tập này thuộc mùa KHÁC trong cùng thương hiệu."""
+        ep = int(v.get("episode") or 0)
+        lo, hi = rong.get(v.get("series") or "", (0, 0))
+        lo = ep if not lo else min(lo, ep)
+        hi = max(hi, ep)
+        tong = media.get("episodes")
+        # Chỉ nghi "cộng dồn" khi khoảng vượt số tập của entry đã ghép.
+        if not isinstance(tong, int) or tong <= 0 or (hi <= tong and lo <= tong):
+            return media, ep, aid
+        kq = _dinh_tuyen_tap(media, lo, hi, cache, memo_dinh_tuyen)
+        if not kq:
+            return media, ep, aid
+        ke, kieu = kq
+        dich = ke.get(ep)
+        if not dich:
+            return media, ep, aid
+        node, local_ep = dich
+        node = dict(node, episodes=node.get("episodes"))
+        so_dinh_tuyen[kieu] = so_dinh_tuyen.get(kieu, 0) + 1
+        if node.get("id") == media.get("id"):
+            return media, local_ep, aid
+        return node, local_ep, id_theo_anilist.get(node.get("id"))
     for i, v in enumerate(videos, 1):
         # Video đã có link (ở lần chạy trước hoặc gán đúng cho bộ khác) → bỏ qua.
-        if v.get("url") in da_co_url:
+        # Khi biết link cũ gắn vào ĐÂU (`da_co`) thì vẫn phải xét lại: gắn sai bộ
+        # (do định tuyến tập cộng dồn) mới là ca cần sửa, không phải ca cần bỏ qua.
+        if da_co is None and v.get("url") in da_co_url:
             bo_qua_da_co += 1
             continue
         max_eps[v["series"]] = max(max_eps.get(v["series"], 0),
@@ -324,13 +456,18 @@ def _link_rows(DB, videos, cache, verbose=True, da_co_url=None):
         if local:
             # Đã có bộ trong DB → KHÔNG cần gọi AniList, và không ghi đè hồ sơ.
             media, confidence, how = local["media"], 1.0, how_local
+            media, ep, aid = _dinh_tuyen(media, v, local["anime_id"])
+            v = dict(v, episode=ep)
             # Chốt chặn "không link nào vượt tổng số tập" áp dụng CẢ đường này.
             total = media.get("episodes")
-            if isinstance(total, int) and total > 0 and v["episode"] > total:
-                _ghi_review(need_review, can_soat, v["series"], v["episode"],
-                            total, local["anime_id"])
+            if isinstance(total, int) and total > 0 and ep > total:
+                _ghi_review(need_review, can_soat, v["series"], ep,
+                            total, aid)
                 continue
-            matched.append((v, media, confidence, how, local["anime_id"]))
+            if _da_giong(v, aid, ep):
+                bo_qua_da_co += 1
+                continue
+            matched.append((v, media, confidence, how, aid))
             continue
         # Đường AniList: `resolve_series` xét MÙA ("S3"/"Mùa 2") và SỐ TẬP, nên
         # "Đại chiến người Khổng Lồ S3" vào đúng entry mùa 3 thay vì bộ mùa 1.
@@ -353,14 +490,22 @@ def _link_rows(DB, videos, cache, verbose=True, da_co_url=None):
         # Ca thật: Muse đăng "Hunter x Hunter (2011)" 148 tập nhưng AniList entry
         # khớp tên là bản 1999 (62 tập) → 86 link bị gán sai bộ và hiện lẫn trong
         # danh sách tập của bộ kia. Thà bỏ và báo ra để biết còn hơn ghi bừa.
+        media, ep, aid = _dinh_tuyen(media, v, None)
+        v = dict(v, episode=ep)
         total = media.get("episodes")
-        if isinstance(total, int) and total > 0 and v["episode"] > total:
-            _ghi_review(need_review, can_soat, v["series"], v["episode"], total,
-                        anilist_id=media.get("id"))
+        if isinstance(total, int) and total > 0 and ep > total:
+            _ghi_review(need_review, can_soat, v["series"], ep, total,
+                        anime_id=aid, anilist_id=media.get("id"))
+            continue
+        if _da_giong(v, aid, ep):
+            bo_qua_da_co += 1
             continue
 
-        matched.append((v, media, confidence, how, None))
+        matched.append((v, media, confidence, how, aid))
 
+    if verbose and any(so_dinh_tuyen.values()):
+        print(f"  · định tuyến tập cộng dồn: {so_dinh_tuyen.get('cumulative', 0)} "
+              f"video (qua mùa) · {so_dinh_tuyen.get('fill', 0)} video (gộp phần)")
     if bo_qua_da_co and verbose:
         print(f"  · {bo_qua_da_co} video đã có link từ trước (bỏ qua, không đếm lại)")
 
@@ -395,7 +540,7 @@ def _link_rows(DB, videos, cache, verbose=True, da_co_url=None):
     return rows, links, unmatched, need_review, can_soat, max_eps
 
 
-def job_alias(DB, limit: int = 80) -> int:
+def job_alias(DB, limit: int = 80, cache: Optional[Dict] = None) -> int:
     """Job K — tên tiếng Việt trên kênh → bộ trong DB (qua TMDB → AniList).
 
     VÌ SAO CẦN: Muse VN đặt tiêu đề bằng tiếng Việt ("Đại chiến người Khổng Lồ",
@@ -413,6 +558,7 @@ def job_alias(DB, limit: int = 80) -> int:
     không ghi đè `title_vi`/`episodes_total` của bộ đã có.
     """
     print("\n▶ Job K — tên tiếng Việt → bộ trong DB (TMDB → AniList)")
+    cache = cache if cache is not None else {}
     if not tmdb.is_configured():
         print("  ⚠ thiếu TMDB_API_KEY → bỏ qua (không có cầu nối tên Việt)")
         return 0
@@ -470,6 +616,25 @@ def job_alias(DB, limit: int = 80) -> int:
             if not cands:
                 continue
             media, why = match.choose_entry(cands, name, season, max_ep)
+            if not media and max_ep:
+                # `max_ep` là số tập CỘNG DỒN của cả thương hiệu (Slime S3 thấy
+                # tới tập 72 trong khi mùa 3 chỉ có 24 tập) ⇒ `choose_entry` loại
+                # sạch ứng viên. Thử lại theo tên+mùa, rồi KIỂM bằng mô hình
+                # đánh số: tập lớn nhất phải rơi vào đúng mùa này.
+                media2, why2 = match.choose_entry(cands, name, season, 0)
+                if media2:
+                    ok, ly_do = False, "không kiểm được mô hình đánh số"
+                    try:
+                        ok, ly_do = franchise.phu_hop(media2, max_ep, cache)
+                    except Exception as e:      # noqa: BLE001
+                        ly_do = f"lỗi AniList: {type(e).__name__}"
+                    if ok:
+                        media, why = media2, f"{why2} · {ly_do}"
+                        print(f"  · {name[:44]}: chọn theo tên+mùa — {ly_do}")
+                    else:
+                        why = f"{why2} · {ly_do}"
+                else:
+                    why = why2
             if media:
                 break
         if not media:
@@ -482,18 +647,54 @@ def job_alias(DB, limit: int = 80) -> int:
         if not aid:
             da_bo.append(f"{name}  (không lấy được anime_id)")
             continue
+        # Tên KHÔNG kèm mùa ("…Slime") phải gắn vào entry ĐẦU của thương hiệu,
+        # không phải mùa đang ghép: Muse đánh số tập CỘNG DỒN (S1 1–24,
+        # S3 49–72) nên "…Slime - Tập 50" là mùa 3, "…Tập 13" là mùa 1. Job C
+        # định tuyến bằng `franchise.plan` từ entry gốc này.
+        aid_base = aid
+        key_base = _khoa_ten(base or "")
+        if key_base and key_base != _khoa_ten(name):
+            try:
+                goc = franchise.goc(media, cache)
+            except Exception:                # noqa: BLE001
+                goc = None
+            if goc and goc.get("id") and goc["id"] != media.get("id"):
+                try:
+                    _, id_map2 = _upsert_media(DB, [anilist.media(goc["id"])])
+                    aid_base = id_map2.get(goc["id"]) or aid
+                    if aid_base != aid:
+                        print(f"        · tên không kèm mùa → gắn vào entry đầu "
+                              f"của thương hiệu (anilist {goc['id']})")
+                except Exception as e:       # noqa: BLE001 — vẫn ghi vào mùa này
+                    print(f"        · không lấy được entry đầu thương hiệu "
+                          f"({type(e).__name__}: {str(e)[:60]}) → gắn vào mùa này")
+
         alias_rows = []
-        for alias in (name, base):
+        for alias, aid_alias in ((name, aid), (base, aid_base)):
             key = _khoa_ten(alias or "")
-            if key:
-                alias_rows.append({"anime_id": aid, "alias": alias,
-                                   "alias_key": key, "source": "tmdb_vi"})
+            if not key:
+                continue
+            if any(r["alias_key"] == key and r["anime_id"] == aid_alias
+                   for r in alias_rows):
+                continue
+            alias_rows.append({"anime_id": aid_alias, "alias": alias,
+                               "alias_key": key, "source": "tmdb_vi"})
         try:
             DB.upsert("anime_alias", alias_rows,
                       on_conflict="anime_id,alias_key", fallback_per_row=True)
         except Exception as e:               # noqa: BLE001
             da_bo.append(f"{name}  (ghi alias lỗi: {str(e)[:60]})")
             continue
+        # Một tên chỉ được trỏ về MỘT bộ. Ca thật 03/11/2026: "…Slime" được ghi
+        # cho cả "2nd Season" (701) lẫn "3rd Season" (702) ⇒ chỉ mục nhập nhằng
+        # ⇒ `_tra_chi_muc` trả None ⇒ 12 video không ghép được.
+        if key_base and aid_base:
+            try:
+                DB.delete("anime_alias", {"alias_key": key_base,
+                                          "anime_id": f"neq.{aid_base}"})
+            except Exception as e:           # noqa: BLE001 — dọn dẹp, không chặn
+                print(f"        · không dọn được alias trùng "
+                      f"({type(e).__name__}: {str(e)[:60]})")
         rows_written += len(alias_rows)
         print(f"  [{i}/{len(rows)}] {name[:44]:<44} → {media['title']['romaji'][:34]} "
               f"(anilist {media['id']}, mùa {season or '—'})")
@@ -636,12 +837,18 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
     # 1999 (62 tập) nên thấy tập 100 > 62 → tưởng là lỗi. Kiểm URL trước là
     # cách rẻ nhất để không báo động giả và không ghi đè link đúng.
     da_co_url: set = set()
+    da_co: Optional[Dict[str, list]] = None
     if not DB.dry:
         try:
-            da_co_url = {r.get("url") for r in DB.select_all(
-                "streaming_links", "select=url")}
+            da_co = {r.get("url"): [r.get("anime_id"), r.get("episode_number")]
+                     for r in DB.select_all(
+                         "streaming_links",
+                         "select=url,anime_id,episode_number")}
+            da_co_url = set(da_co)
             print(f"  · {len(da_co_url)} video đã có link (bỏ qua khi ghép)")
         except Exception as e:            # noqa: BLE001 — không chặn job
+            da_co = None
+            da_co_url = set()
             print(f"  ! không đọc được link đã có ({type(e).__name__}: "
                   f"{str(e)[:90]}) → vẫn chạy, chỉ tốn thêm upsert")
 
@@ -660,9 +867,12 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
         if not videos:
             continue
 
+        khoang = _khoang_tap(DB, ch["key"])
         try:
             (rows, links, unmatched, need_review, can_soat,
-             max_eps) = _link_rows(DB, videos, cache, da_co_url=da_co_url)
+             max_eps) = _link_rows(DB, videos, cache, da_co_url=da_co_url,
+                                   rong=_gop_khoang(khoang, _run_ranges(videos)),
+                                   da_co=da_co)
         except Exception as e:
             print(f"  ✗ lỗi khi ghép tên/ghi {ch['name']}: {type(e).__name__}: {e}")
             failures.append(f"{ch['name']}: {e}")
@@ -685,6 +895,29 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
                       on_conflict="anime_id,platform,region,episode_number",
                       fallback_per_row=True)
             print(f"  ✓ đã ghi {len(links)} link / {len(rows)} anime (kênh {ch['name']})")
+            # Link cũ gắn SAI bộ/tập (do đánh số cộng dồn qua mùa) → xoá hàng cũ,
+            # nhưng KHÔNG xoá khoá mà lần này vừa ghi (nếu không sẽ xoá luôn link mới).
+            moi = {(l["anime_id"], l["episode_number"]) for l in links}
+            sai = set()
+            for l in links:
+                cu = (da_co or {}).get(l.get("url"))
+                if cu and (cu[0], cu[1]) != (l["anime_id"], l["episode_number"]):
+                    sai.add((cu[0], cu[1]))
+            sai -= moi
+            for aid_cu, ep_cu in sorted(sai):
+                try:
+                    DB.delete("streaming_links", {
+                        "anime_id": aid_cu, "episode_number": ep_cu,
+                        "platform": "youtube", "region": "VN"})
+                except Exception as e:          # noqa: BLE001 — chỉ là dọn dẹp
+                    print(f"  ! không xoá được link cũ ({aid_cu}, tập {ep_cu}): "
+                          f"{type(e).__name__}: {str(e)[:70]}")
+            if sai:
+                print(f"  · xoá {len(sai)} link cũ gắn sai bộ/tập")
+
+        n_khoang = _ghi_khoang_tap(DB, ch["key"], khoang, _run_ranges(videos))
+        if n_khoang:
+            print(f"  · cập nhật khoảng số tập cho {n_khoang} tên series")
 
         total_rows += len(rows)
         total_links += len(links)

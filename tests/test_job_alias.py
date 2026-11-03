@@ -43,6 +43,10 @@ class FakeDB:
     def dry(self, v):
         self._dry = v
 
+    def delete(self, table, filters):
+        self.upserted.append((f"delete:{table}", [filters], None))
+        return 1
+
     def log_ingest(self, *a, **k):
         self.logs.append(a)
 
@@ -126,6 +130,70 @@ class TestJobAlias(unittest.TestCase):
         n, out = self._run(db)
         self.assertEqual(n, 0)
         self.assertIn("trống", out)
+
+
+class TestAliasKhongKemMua(unittest.TestCase):
+    """Tên không kèm mùa phải gắn vào entry ĐẦU của thương hiệu, không phải mùa
+    đang ghép — vì Muse đánh số tập cộng dồn (Tập 50 = mùa 3)."""
+
+    ROW3 = {"series_name": "Lúc đó tôi đã chuyển sinh thành Slime S3",
+            "videos": 24, "max_episode": 72}
+    GOC = {"id": 39535, "episodes": 24, "format": "TV",
+           "title": {"romaji": "Tensei Shitara Slime Datta Ken"}}
+    S3 = {"id": 156822, "episodes": 24, "format": "TV",
+          "title": {"romaji": "Tensei Shitara Slime Datta Ken 3rd Season"}}
+
+    def test_tap_cong_don_khong_lam_mat_mua(self):
+        """max_episode 72 (cộng dồn) không được làm job K bỏ entry 24 tập."""
+        db = FakeDB([self.ROW3])
+        buf = io.StringIO()
+        with patch.object(tmdb, "is_configured", return_value=True), \
+             patch.object(tmdb, "find_vietnamese", return_value=(TMDB_HIT, 0.9)), \
+             patch.object(tmdb, "fetch_detail", return_value=DETAIL), \
+             patch.object(ingest_main.anilist, "search_media", return_value=[self.S3]), \
+             patch.object(ingest_main.franchise, "goc", return_value=self.GOC), \
+             patch.object(ingest_main.anilist, "media", return_value=self.GOC), \
+             patch.object(ingest_main.franchise, "phu_hop",
+                          return_value=(True, "cộng dồn qua mùa (tập 72 → tập 24 của mùa này)")), \
+             redirect_stdout(buf):
+            n = ingest_main.job_alias(db)
+        self.assertEqual(n, 2, buf.getvalue())
+        self.assertIn("cộng dồn", buf.getvalue())
+
+    def test_ten_goc_va_ten_khong_mua_vao_hai_bo(self):
+        db = FakeDB([self.ROW3])
+        buf = io.StringIO()
+        with patch.object(tmdb, "is_configured", return_value=True), \
+             patch.object(tmdb, "find_vietnamese", return_value=(TMDB_HIT, 0.9)), \
+             patch.object(tmdb, "fetch_detail", return_value=DETAIL), \
+             patch.object(ingest_main.anilist, "search_media", return_value=[self.S3]), \
+             patch.object(ingest_main.franchise, "goc", return_value=self.GOC), \
+             patch.object(ingest_main.anilist, "media", return_value=self.GOC), \
+             patch.object(ingest_main.franchise, "phu_hop", return_value=(True, "ok")), \
+             redirect_stdout(buf):
+            n = ingest_main.job_alias(db)
+        self.assertEqual(n, 2, buf.getvalue())
+        alias_ups = [u for u in db.upserted if u[0] == "anime_alias"][0]
+        theo_alias = {r["alias"]: r["anime_id"] for r in alias_ups[1]}
+        # tên có mùa → giữ ở entry mùa 3 (id 77 giả lập cho cả hai lần upsert)
+        self.assertIn("Lúc đó tôi đã chuyển sinh thành Slime S3", theo_alias)
+
+    def test_don_alias_trung_tren_bo_khac(self):
+        db = FakeDB([self.ROW3])
+        da_xoa = []
+        db.delete = lambda table, filters: da_xoa.append((table, filters)) or 1
+        with patch.object(tmdb, "is_configured", return_value=True), \
+             patch.object(tmdb, "find_vietnamese", return_value=(TMDB_HIT, 0.9)), \
+             patch.object(tmdb, "fetch_detail", return_value=DETAIL), \
+             patch.object(ingest_main.anilist, "search_media", return_value=[self.S3]), \
+             patch.object(ingest_main.franchise, "goc", return_value=self.GOC), \
+             patch.object(ingest_main.anilist, "media", return_value=self.GOC), \
+             patch.object(ingest_main.franchise, "phu_hop", return_value=(True, "ok")), \
+             redirect_stdout(io.StringIO()):
+            ingest_main.job_alias(db)
+        self.assertTrue(any(t == "anime_alias" and "neq." in str(f.get("anime_id"))
+                            for t, f in da_xoa),
+                        "phải xoá alias cùng tên đang trỏ về bộ khác")
 
 
 class TestChiMucDungAlias(unittest.TestCase):
