@@ -405,7 +405,12 @@ def _link_rows(DB, videos, cache, verbose=True, da_co_url=None, rong=None,
             id_theo_anilist[_e["anilist_id"]] = _e["anime_id"]
     # Khoảng số tập: gộp khoảng các lần chạy trước với lần này (lần này có thể
     # chỉ còn vài tập mới nhất vì RSS chỉ trả ~15 video/kênh).
-    rong = _gop_khoang(rong, _run_ranges(videos))
+    #
+    # KHÔNG truyền `rong` ⇒ KHÔNG định tuyến. Cố ý: job_youtube luôn truyền khoảng
+    # đọc từ `youtube_series_range`, còn test/--dry-run không có dữ liệu thật thì
+    # không được tự suy ra rồi gọi AniList (test sẽ phụ thuộc mạng: máy không có
+    # mạng thì qua, CI có mạng thì trả dữ liệu thật ⇒ đỏ ngẫu nhiên).
+    rong = dict(rong or {})
     memo_dinh_tuyen: Dict[str, object] = {}
     so_dinh_tuyen = {"fill": 0, "cumulative": 0}
 
@@ -417,7 +422,10 @@ def _link_rows(DB, videos, cache, verbose=True, da_co_url=None, rong=None,
     def _dinh_tuyen(media: Dict, v: Dict, aid):
         """Đổi (entry, số tập) nếu tập này thuộc mùa KHÁC trong cùng thương hiệu."""
         ep = int(v.get("episode") or 0)
-        lo, hi = rong.get(v.get("series") or "", (0, 0))
+        ten_series = v.get("series") or ""
+        if ten_series not in rong:
+            return media, ep, aid
+        lo, hi = rong.get(ten_series, (0, 0))
         lo = ep if not lo else min(lo, ep)
         hi = max(hi, ep)
         tong = media.get("episodes")

@@ -10,6 +10,11 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
+try:                                     # discover -s tests ⇒ tests/ nằm trên path
+    from tests._offline import KhongMang
+except ImportError:                      # chạy `python3 -m unittest tests.x`
+    from _offline import KhongMang
+
 from ingest import main as ingest_main
 from ingest import match, tmdb, youtube
 
@@ -66,7 +71,7 @@ AL_CANDS = [
 ]
 
 
-class TestJobAlias(unittest.TestCase):
+class TestJobAlias(KhongMang, unittest.TestCase):
 
     def _run(self, db, **kw):
         buf = io.StringIO()

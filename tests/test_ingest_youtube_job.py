@@ -15,6 +15,11 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
+try:                                     # discover -s tests ⇒ tests/ nằm trên path
+    from tests._offline import KhongMang
+except ImportError:                      # chạy `python3 -m unittest tests.x`
+    from _offline import KhongMang
+
 from ingest import main as ingest_main
 from ingest import config, match, youtube
 
@@ -239,7 +244,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestVuotTongTapNhacJobD(unittest.TestCase):
+class TestVuotTongTapNhacJobD(KhongMang, unittest.TestCase):
     """Job C gặp video vượt `episodes_total` → xoá `tmdb_checked_at`, để job D soát.
 
     Vì sao: DAN DA DAN S2 thật có 24 tập nhưng DB ghi 12 ⇒ 12 tập thật bị chặn.
