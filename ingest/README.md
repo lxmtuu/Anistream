@@ -893,6 +893,66 @@ Tên tiếng Trung không search được trên AniList → thêm vào `aliases.
 Đây là **phần biên tập tạo giá trị riêng** của app (không đối thủ nào có danh mục này bằng tiếng Việt).
 Mẹo tìm ID: `python3 -m ingest.main` chỉ log tên, tìm trên https://anilist.co rồi lấy số trong URL.
 
+## Đánh số tập CỘNG DỒN qua các mùa — job C tự định tuyến (03/11/2026)
+
+Sau khi job K chạy thật (11 tên ghép được, `anime_alias` 22 dòng), DB lên
+**229 bộ · 2.978 tập · 1.403 link · 93 bộ có video**. Nhưng soi từng link thì
+thấy **số tập sai mùa**:
+
+| Bộ | Link | Nội dung thật |
+|---|---|---|
+| `tensei-shitara-slime-datta-ken-3rd-season` (702) | 12 link, tập **13–24** | Muse đánh S3 = **49–72** ⇒ 13–24 là tập **MÙA 1** |
+| `tensei-shitara-slime-datta-ken-2nd-season` (701) | **0 link** | 25 video vào `review` (tập 25–48 > 12 tập) |
+| `shingeki-no-kyojin-season-3` (699) | 12/22 video | Muse đánh S3 = **1–22** (Season 3 + Part 2) |
+
+Đọc tiêu đề thật qua oEmbed (không cần API key):
+
+```
+https://youtu.be/iry712JcyDc → "Lúc đó tôi đã chuyển sinh thành Slime - Tập 13"
+```
+
+Video đó là mùa 3 nhưng tiêu đề **không có chữ "S3"** và số tập **chạy tiếp**:
+S1 = 1–24, S2 = 25–48, S3 = 49–72. Cùng quy luật đo được ở Re:Zero (S4 tới tập
+85 = 25+12+12+16+20), Frieren Phần 2 (29–38), SPY×FAMILY S3 (tới 50), 100 cô bạn
+gái S3 (36), Wistoria S2 (24), Shangri-La S2 (50), One Punch Man S2 (24), Vong
+linh… phần 2 (24) — trong khi Ansatsu S2 lại đánh 1–25 (không cộng dồn).
+
+Nay job C dựng **chuỗi thương hiệu** từ quan hệ AniList (PREQUEL/SEQUEL), cộng
+dồn số tập theo thứ tự phát sóng, rồi **định tuyến từng video**:
+
+```
+  · định tuyến tập cộng dồn: 25 video (qua mùa) · 10 video (gộp phần)
+  · cập nhật khoảng số tập cho 34 tên series
+  · xoá 12 link cũ gắn sai bộ/tập
+```
+
+Hai mô hình, chọn theo DỮ LIỆU chứ không đoán:
+
+* **fill** — Muse đánh lại từ 1 mỗi mùa nhưng một "mùa" của Muse gồm nhiều entry
+  AniList (Shingeki S3 = Season 3 12 tập + Part 2 10 tập ⇒ Muse đánh 1–22).
+* **cumulative** — Muse đánh tiếp qua cả thương hiệu (Slime, Re:Zero, Frieren…).
+
+Kế hoạch chỉ được nhận khi nó phủ **HẾT** khoảng `[min, max]` đã thấy trên kênh;
+không phủ ⇒ không làm gì (thà thiếu còn hơn gán bừa).
+
+Bảng mới **`youtube_series_range`** (`channel, series_name, ep_min, ep_max`) giữ
+khoảng đã thấy ở MỌI lần chạy — cần vì RSS chỉ trả ~15 video/kênh, lần chạy sau
+chỉ thấy tập 70–72, nếu chỉ dùng dữ liệu lần chạy thì mô hình đánh số sai mùa.
+
+Kèm 3 bản vá dữ liệu:
+
+1. **Link cũ gắn sai** nay được xét lại: job C đọc `streaming_links(anime_id,
+   episode_number, url)` và chỉ bỏ qua khi (bộ, tập) mới **trùng** cái cũ. Lệch ⇒
+   ghi lại và **xoá hàng cũ** (trừ khoá vừa ghi).
+2. **`anime_alias` không còn nhập nhằng**: tên không kèm mùa gắn vào **entry đầu
+   của thương hiệu** (không phải mùa đang ghép) và alias cùng tên trỏ về bộ khác
+   bị xoá — ca thật: "…Slime" bị ghi cho cả 701 lẫn 702 ⇒ chỉ mục nhập nhằng ⇒
+   12 video không ghép được.
+3. **Job K không mất mùa vì số tập cộng dồn**: `max_episode` 72 làm
+   `choose_entry` loại sạch entry 24 tập ⇒ job K thử lại theo tên+mùa rồi **kiểm
+   bằng mô hình đánh số** (`franchise.phu_hop`): tập lớn nhất phải rơi vào đúng
+   mùa này (hoặc mùa này gộp nhiều part).
+
 ## Job K — tên tiếng Việt → bộ trong DB (TMDB → AniList) (03/11/2026)
 
 Sau khi sửa ghép tên + đọc tên trong mô tả, DB tăng mạnh: **219 bộ · 2.919 tập ·

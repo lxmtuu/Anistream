@@ -9,6 +9,10 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
+try:                                     # discover -s tests ⇒ tests/ nằm trên path
+    from tests._offline import KhongMang
+except ImportError:                      # chạy `python3 -m unittest tests.x`
+    from _offline import KhongMang
 from ingest import anilist
 from ingest import main as ingest_main
 
@@ -59,7 +63,7 @@ class TestIsSeriesLike(unittest.TestCase):
             self.assertFalse(anilist.is_series_like({"format": fmt}), fmt)
 
 
-class TestJobSeasons(unittest.TestCase):
+class TestJobSeasons(KhongMang, unittest.TestCase):
     def _run(self, db, sequels_map, rows=None):
         def fake_sequels(aid):
             v = sequels_map.get(aid, [])
