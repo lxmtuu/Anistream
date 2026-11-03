@@ -27,12 +27,17 @@ from ingest import config, match, youtube
 class FakeDB:
     def __init__(self):
         self.upserted = []
+        self.conflicts = []
+        self.partial_streaming_write = False
         self.logs = []
         self.dry = False
         self._next_id = 100
 
     def upsert(self, table, rows, on_conflict=None, fallback_per_row=False):
         self.upserted.append((table, list(rows)))
+        self.conflicts.append((table, on_conflict))
+        if table == "streaming_links" and self.partial_streaming_write:
+            return list(rows)[:-1]
         if table == "anime":
             out = []
             for r in rows:
@@ -88,9 +93,11 @@ class TestJobYoutubePerChannel(unittest.TestCase):
         for p in self.patches:
             p.stop()
 
-    def _run(self, per_channel, resolve=None, dry=False, expect_error=False):
+    def _run(self, per_channel, resolve=None, dry=False, expect_error=False,
+             partial_streaming_write=False):
         db = FakeDB()
         db.dry = dry
+        db.partial_streaming_write = partial_streaming_write
         calls = []
 
         def _collect(ch, **kw):
@@ -116,8 +123,9 @@ class TestJobYoutubePerChannel(unittest.TestCase):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 if expect_error:
-                    with self.assertRaises(RuntimeError):
+                    with self.assertRaises(RuntimeError) as ctx:
                         ingest_main.job_youtube(db)
+                    db.last_error = str(ctx.exception)
                     n = 0
                 else:
                     n = ingest_main.job_youtube(db)
@@ -151,6 +159,15 @@ class TestJobYoutubePerChannel(unittest.TestCase):
         self.assertTrue(db.logs[-1][2])
         self.assertEqual(db.logs[-1][3], 2)
         self.assertEqual(db.logs[-1][4], "")
+
+    def test_upsert_link_dùng_url_làm_khoá_và_thiếu_row_thì_nổ(self):
+        """Không được xoá mapping cũ sau khi partial-upsert làm rơi video."""
+        db, _, out = self._run(
+            {"muse_vn": [video("crayon shinchan", 1)], "ani_one_asia": []},
+            expect_error=True, partial_streaming_write=True)
+        self.assertIn(("streaming_links", "platform,url"), db.conflicts)
+        self.assertIn("upsert streaming_links ghi 0/1 row", db.last_error)
+        self.assertNotIn("đã ghi 1 link", out)
 
     def test_cache_được_lưu_ra_đĩa_và_dùng_lại(self):
         self._run({"muse_vn": [video("crayon shinchan", 1)], "ani_one_asia": []})

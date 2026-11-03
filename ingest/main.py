@@ -899,29 +899,19 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
         if DB.dry:
             print(f"  [dry-run] sẽ upsert {len(links)} streaming_links")
         elif links:
-            DB.upsert("streaming_links", links,
-                      on_conflict="anime_id,platform,region,episode_number",
-                      fallback_per_row=True)
-            print(f"  ✓ đã ghi {len(links)} link / {len(rows)} anime (kênh {ch['name']})")
-            # Link cũ gắn SAI bộ/tập (do đánh số cộng dồn qua mùa) → xoá hàng cũ,
-            # nhưng KHÔNG xoá khoá mà lần này vừa ghi (nếu không sẽ xoá luôn link mới).
-            moi = {(l["anime_id"], l["episode_number"]) for l in links}
-            sai = set()
-            for l in links:
-                cu = (da_co or {}).get(l.get("url"))
-                if cu and (cu[0], cu[1]) != (l["anime_id"], l["episode_number"]):
-                    sai.add((cu[0], cu[1]))
-            sai -= moi
-            for aid_cu, ep_cu in sorted(sai):
-                try:
-                    DB.delete("streaming_links", {
-                        "anime_id": aid_cu, "episode_number": ep_cu,
-                        "platform": "youtube", "region": "VN"})
-                except Exception as e:          # noqa: BLE001 — chỉ là dọn dẹp
-                    print(f"  ! không xoá được link cũ ({aid_cu}, tập {ep_cu}): "
-                          f"{type(e).__name__}: {str(e)[:70]}")
-            if sai:
-                print(f"  · xoá {len(sai)} link cũ gắn sai bộ/tập")
+            # URL YouTube là định danh video duy nhất. Nếu đổi bộ/tập, upsert theo
+            # (platform,url) sẽ UPDATE hàng cũ tại chỗ. Upsert theo anime/tập sẽ
+            # đụng unique(platform,url); trước đây fallback bỏ 12 hàng rồi vẫn
+            # xoá hàng cũ, làm video biến mất hoàn toàn khỏi DB.
+            da_ghi = DB.upsert(
+                "streaming_links", links, on_conflict="platform,url",
+                fallback_per_row=True)
+            if len(da_ghi) != len(links):
+                raise RuntimeError(
+                    f"upsert streaming_links ghi {len(da_ghi)}/{len(links)} row; "
+                    "không xác nhận ingest thành công"
+                )
+            print(f"  ✓ đã ghi {len(da_ghi)} link / {len(rows)} anime (kênh {ch['name']})")
 
         n_khoang = _ghi_khoang_tap(DB, ch["key"], khoang, _run_ranges(videos))
         if n_khoang:
