@@ -172,6 +172,7 @@ def _chi_muc_ten(DB) -> Dict[str, List[Dict]]:
         return {}
 
     idx: Dict[str, List[Dict]] = {}
+    theo_id: Dict[int, Dict] = {}
     for r in rows:
         if not r.get("anilist_id"):
             continue
@@ -202,8 +203,20 @@ def _chi_muc_ten(DB) -> Dict[str, List[Dict]]:
                 k = _khoa_ten(next((x for x in inner if x), ""))
                 if k:
                     keys.add(k)
+        theo_id[r["id"]] = entry
         for k in keys:
             idx.setdefault(k, []).append(entry)
+
+    # Tên KHÁC (thường là tên tiếng Việt) do job K ghi vào `anime_alias`.
+    try:
+        aliases = DB.select_all("anime_alias", "select=anime_id,alias,alias_key")
+    except Exception:                   # noqa: BLE001 — bảng có thể chưa có
+        aliases = []
+    for a in aliases:
+        entry = theo_id.get(a.get("anime_id"))
+        key = a.get("alias_key") or _khoa_ten(a.get("alias") or "")
+        if entry and key:
+            idx.setdefault(key, []).append(entry)
     return idx
 
 
@@ -283,15 +296,24 @@ def _ghi_review(need_review: Dict[str, int], can_soat: Dict[str, str],
         can_soat[f"anilist:{anilist_id}"] = series
 
 
-def _link_rows(DB, videos, cache, verbose=True):
+def _link_rows(DB, videos, cache, verbose=True, da_co_url=None):
     """Ghép tên → anime rồi tạo rows `streaming_links`. Trả (matched, links, unmatched)."""
     matched, unmatched, need_review = [], {}, {}
     can_soat: Dict[str, str] = {}      # "id:<anime_id>" | "anilist:<id>" → series
+    da_co_url = da_co_url or set()
+    bo_qua_da_co = 0
+    max_eps: Dict[str, int] = {}       # series → số tập lớn nhất thấy được
     # Chỉ mục tên bộ có sẵn trong DB (gồm `title_vi`) — thử TRƯỚC khi gọi AniList.
     idx = _chi_muc_ten(DB)
     if idx and verbose:
         print(f"  · chỉ mục tên trong DB: {len(idx)} khoá")
     for i, v in enumerate(videos, 1):
+        # Video đã có link (ở lần chạy trước hoặc gán đúng cho bộ khác) → bỏ qua.
+        if v.get("url") in da_co_url:
+            bo_qua_da_co += 1
+            continue
+        max_eps[v["series"]] = max(max_eps.get(v["series"], 0),
+                                   int(v.get("episode") or 0))
         ten = _ten_ung_vien(v)
         local, how_local = None, ""
         for name, _ in ten:
@@ -339,8 +361,11 @@ def _link_rows(DB, videos, cache, verbose=True):
 
         matched.append((v, media, confidence, how, None))
 
+    if bo_qua_da_co and verbose:
+        print(f"  · {bo_qua_da_co} video đã có link từ trước (bỏ qua, không đếm lại)")
+
     if not matched:
-        return [], [], unmatched, need_review, can_soat
+        return [], [], unmatched, need_review, can_soat, max_eps
 
     # upsert anime trước để có id (chỉ bộ mới đến từ AniList; bộ đã có trong DB
     # đã có `anime_id` nên không ghi lại hồ sơ)
@@ -367,7 +392,121 @@ def _link_rows(DB, videos, cache, verbose=True):
             # parse sai (vd bản gộp "Tập 01-24" từng bị gán thành tập 1).
             "source_title": (v.get("raw_title") or "")[:300] or None,
         })
-    return rows, links, unmatched, need_review, can_soat
+    return rows, links, unmatched, need_review, can_soat, max_eps
+
+
+def job_alias(DB, limit: int = 80) -> int:
+    """Job K — tên tiếng Việt trên kênh → bộ trong DB (qua TMDB → AniList).
+
+    VÌ SAO CẦN: Muse VN đặt tiêu đề bằng tiếng Việt ("Đại chiến người Khổng Lồ",
+    "Thất hình đại tội", "Lúc đó tôi đã chuyển sinh thành Slime") và những tên này
+    KHÔNG có trong AniList. Đo 03/11/2026: sau khi sửa ghép tên, **51 tên vẫn
+    không vào được DB / 601 video**, gồm những bộ lớn nhất của kênh mà DB hoàn
+    toàn không có entry.
+
+    Cầu nối: TMDB search **theo tên Việt** (`language=vi-VN`) → `original_name`
+    (tiếng Nhật) → AniList search theo tên Nhật → `choose_entry` chọn đúng mùa.
+    Kết quả lưu vào `anime_alias` để job C ghép được ngay ở lần chạy sau (và các
+    lần sau nữa, không phải search lại).
+
+    An toàn: chỉ ghi khi tìm được bộ CỤ THỂ; số mùa lấy từ chính tên trên kênh;
+    không ghi đè `title_vi`/`episodes_total` của bộ đã có.
+    """
+    print("\n▶ Job K — tên tiếng Việt → bộ trong DB (TMDB → AniList)")
+    if not tmdb.is_configured():
+        print("  ⚠ thiếu TMDB_API_KEY → bỏ qua (không có cầu nối tên Việt)")
+        return 0
+    if DB.dry:
+        print("  [dry-run] cần Supabase để đọc ingest_unmatched → bỏ qua")
+        return 0
+
+    rows = DB.select_all(
+        "ingest_unmatched",
+        "select=series_name,videos,max_episode&kind=eq.unmatched"
+        f"&order=videos.desc&limit={int(limit)}")
+    if not rows:
+        print("  ✓ không có tên nào cần ghép (ingest_unmatched trống)")
+        return 0
+    print(f"  · {len(rows)} tên chưa ghép cần thử")
+
+    rows_written = 0
+    da_bo = []
+    for i, r in enumerate(rows, 1):
+        name = (r.get("series_name") or "").strip()
+        if not name:
+            continue
+        season = youtube.season_from_vn(name)
+        max_ep = int(r.get("max_episode") or 0)
+        base = youtube.base_from_vn(name)
+
+        # 1) TMDB: tên Việt → series (thử tên đầy đủ, rồi tên đã bỏ hậu tố mùa)
+        found, score = (None, 0.0)
+        for q in (name, base):
+            if not q:
+                continue
+            found, score = tmdb.find_vietnamese(q)
+            if found:
+                break
+        if not found:
+            da_bo.append(f"{name}  (TMDB không khớp, điểm {score:.2f})")
+            continue
+
+        try:
+            detail = tmdb.fetch_detail(found["id"])
+        except Exception as e:               # noqa: BLE001 — 1 bộ hỏng không chặn job
+            da_bo.append(f"{name}  (TMDB detail lỗi: {str(e)[:60]})")
+            continue
+
+        # 2) AniList: tìm theo tên Nhật (original_name), rồi tên tiếng Anh
+        media, why = None, "không có ứng viên"
+        for q in (detail.get("original_name"), tmdb.english_title(detail)):
+            if not q or len(q) < 2:
+                continue
+            try:
+                cands = anilist.search_media(q, per_page=10)
+            except Exception as e:           # noqa: BLE001
+                da_bo.append(f"{name}  (AniList lỗi: {str(e)[:60]})")
+                cands = []
+            if not cands:
+                continue
+            media, why = match.choose_entry(cands, name, season, max_ep)
+            if media:
+                break
+        if not media:
+            da_bo.append(f"{name}  (AniList: {why})")
+            continue
+
+        # 3) Ghi: bộ (nếu chưa có) + tên Việt vào `anime_alias`
+        _, id_map = _upsert_media(DB, [media])
+        aid = id_map.get(media.get("id"))
+        if not aid:
+            da_bo.append(f"{name}  (không lấy được anime_id)")
+            continue
+        alias_rows = []
+        for alias in (name, base):
+            key = _khoa_ten(alias or "")
+            if key:
+                alias_rows.append({"anime_id": aid, "alias": alias,
+                                   "alias_key": key, "source": "tmdb_vi"})
+        try:
+            DB.upsert("anime_alias", alias_rows,
+                      on_conflict="anime_id,alias_key", fallback_per_row=True)
+        except Exception as e:               # noqa: BLE001
+            da_bo.append(f"{name}  (ghi alias lỗi: {str(e)[:60]})")
+            continue
+        rows_written += len(alias_rows)
+        print(f"  [{i}/{len(rows)}] {name[:44]:<44} → {media['title']['romaji'][:34]} "
+              f"(anilist {media['id']}, mùa {season or '—'})")
+
+    if da_bo:
+        print(f"  ⚠ {len(da_bo)} tên KHÔNG ghép được (để nguyên, không đoán bừa):")
+        for d in da_bo[:12]:
+            print(f"      - {d}")
+        if len(da_bo) > 12:
+            print(f"      … còn {len(da_bo) - 12} tên nữa")
+    DB.log_ingest("alias", "tmdb_vi", True, rows_written)
+    print(f"  ✓ {rows_written} tên Việt đã ghi vào anime_alias")
+    return rows_written
 
 
 def job_unmatched(DB, limit: int = 40) -> int:
@@ -413,7 +552,8 @@ def job_unmatched(DB, limit: int = 40) -> int:
 
 
 def _luu_chua_khop(DB, channel: str, unmatched: Dict[str, int],
-                   review: Dict[str, int], run_at: str) -> int:
+                   review: Dict[str, int], run_at: str,
+                   max_eps: Optional[Dict[str, int]] = None) -> int:
     """Ghi danh sách tên CHƯA KHỚP vào bảng `ingest_unmatched` rồi dọn tên cũ.
 
     Vì sao không chỉ `print`: danh sách này là **đầu vào duy nhất** để biết có
@@ -429,8 +569,12 @@ def _luu_chua_khop(DB, channel: str, unmatched: Dict[str, int],
         print(f"  [dry-run] sẽ ghi {len(unmatched) + len(review)} tên chưa khớp "
               f"vào ingest_unmatched")
         return 0
+    max_eps = max_eps or {}
     rows = [{"source": "youtube", "channel": channel, "series_name": name,
-             "kind": kind, "videos": cnt, "last_seen_at": run_at}
+             "kind": kind, "videos": cnt, "last_seen_at": run_at,
+             # Số tập LỚN NHẤT thấy trong tiêu đề — job K cần nó để chọn đúng
+             # entry AniList (bộ 25 tập khác bộ 12 tập dù cùng tên).
+             "max_episode": int(max_eps.get(name) or 0)}
             for kind, group in (("unmatched", unmatched), ("review", review))
             for name, cnt in group.items()]
     wrote = 0
@@ -483,6 +627,24 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
     run_at = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     failures = []
 
+    # URL ĐÃ CÓ LINK — lấy 1 lần, dùng cho mọi kênh.
+    #
+    # Vì sao (đo 03/11/2026): "Hunter x Hunter" 86 video và "Fairy Tail" 102 video
+    # bị ghi vào `review` (vượt tổng số tập) trong khi CHÍNH những video đó đã
+    # được ghi đúng vào `hunter-hunter-2011` (148 link) và `fairy-tail-2014`
+    # (102 link) từ trước. Chỉ mục tên trong DB ghép "Hunter x Hunter" vào bản
+    # 1999 (62 tập) nên thấy tập 100 > 62 → tưởng là lỗi. Kiểm URL trước là
+    # cách rẻ nhất để không báo động giả và không ghi đè link đúng.
+    da_co_url: set = set()
+    if not DB.dry:
+        try:
+            da_co_url = {r.get("url") for r in DB.select_all(
+                "streaming_links", "select=url")}
+            print(f"  · {len(da_co_url)} video đã có link (bỏ qua khi ghép)")
+        except Exception as e:            # noqa: BLE001 — không chặn job
+            print(f"  ! không đọc được link đã có ({type(e).__name__}: "
+                  f"{str(e)[:90]}) → vẫn chạy, chỉ tốn thêm upsert")
+
     for n, ch in enumerate(channels, 1):
         print(f"\n  ── Kênh {n}/{len(channels)}: {ch['name']} ──")
         try:
@@ -499,8 +661,8 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
             continue
 
         try:
-            rows, links, unmatched, need_review, can_soat = _link_rows(
-                DB, videos, cache)
+            (rows, links, unmatched, need_review, can_soat,
+             max_eps) = _link_rows(DB, videos, cache, da_co_url=da_co_url)
         except Exception as e:
             print(f"  ✗ lỗi khi ghép tên/ghi {ch['name']}: {type(e).__name__}: {e}")
             failures.append(f"{ch['name']}: {e}")
@@ -547,7 +709,8 @@ def job_youtube(DB, limit: int = 25, check_embed: bool = True,
                   f"đã xoá mốc TMDB, job D sẽ soát lại")
 
         # Ghi CHẨN ĐOÁN của riêng kênh này ngay (kênh sau lỗi không xoá mất).
-        n_diag = _luu_chua_khop(DB, ch["key"], unmatched, need_review, run_at)
+        n_diag = _luu_chua_khop(DB, ch["key"], unmatched, need_review, run_at,
+                                max_eps=max_eps)
         if n_diag:
             print(f"  · {n_diag} tên chưa khớp đã ghi vào ingest_unmatched "
                   f"(kênh {ch['key']})")
@@ -1679,7 +1842,7 @@ def main(argv=None):
     ap.add_argument("command", choices=["schedule", "catalog", "youtube", "tmdb",
                                         "seasons", "jikan", "episodes",
                                         "check", "add", "publish", "coverage",
-                                        "unmatched", "all"])
+                                        "unmatched", "alias", "all"])
     ap.add_argument("--hours", type=int, default=26)
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--limit", type=int, default=25, help="số video mỗi kênh")
@@ -1746,6 +1909,10 @@ def main(argv=None):
             total += job_tmdb(DB, args.limit_tmdb, refresh=args.refresh,
                               only_slug=args.only_slug, force=args.force)
         if args.command == "seasons":
+            # Job K trước job C: tên Việt → alias → job C ghép được ngay.
+            total += job_alias(DB, args.limit)
+            total += job_youtube(DB, args.limit, not args.no_embed_check,
+                                 args.deep, args.max_videos)
             total += job_seasons(DB, args.limit_seasons)
         if args.command == "jikan":
             total += job_jikan(DB, args.limit_jikan, args.only_airing, args.fill_gaps)
@@ -1763,6 +1930,8 @@ def main(argv=None):
             total += job_coverage(DB)
         if args.command == "unmatched":
             total += job_unmatched(DB)
+        if args.command == "alias":
+            total += job_alias(DB, args.limit)
         if args.command == "check":
             total += job_check(DB, strict=not args.no_strict)
         if args.command == "all":
@@ -1775,6 +1944,10 @@ def main(argv=None):
                 print("\n⚠ BỎ QUA Job D (TMDB): chưa có TMDB_API_KEY → "
                       "tên/tóm tắt tiếng Việt và danh sách tập sẽ không được bổ sung.")
                 DB.log_ingest("tmdb", "enrich", False, 0, "thiếu TMDB_API_KEY")
+            # Job K rồi job C: tên Việt → alias → video ghép được ngay trong lượt.
+            total += job_alias(DB, args.limit)
+            total += job_youtube(DB, args.limit, not args.no_embed_check,
+                                 args.deep, args.max_videos)
             total += job_seasons(DB, args.limit_seasons)
             total += job_jikan(DB, args.limit_jikan, fill_gaps=True)
             total += job_link_episodes(DB)

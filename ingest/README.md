@@ -893,6 +893,52 @@ Tên tiếng Trung không search được trên AniList → thêm vào `aliases.
 Đây là **phần biên tập tạo giá trị riêng** của app (không đối thủ nào có danh mục này bằng tiếng Việt).
 Mẹo tìm ID: `python3 -m ingest.main` chỉ log tên, tìm trên https://anilist.co rồi lấy số trong URL.
 
+## Job K — tên tiếng Việt → bộ trong DB (TMDB → AniList) (03/11/2026)
+
+Sau khi sửa ghép tên + đọc tên trong mô tả, DB tăng mạnh: **219 bộ · 2.919 tập ·
+1.340 link · 87 bộ có video**. Nhưng `ingest_unmatched` còn **51 tên / 601 video** —
+và đó là những bộ LỚN NHẤT của kênh mà DB **hoàn toàn không có**:
+
+```
+Đại chiến người Khổng Lồ S1 / S3 / S2 / S4   50 / 45 / 24 / 28 video
+Thất hình đại tội / S2 / S3                  24 video mỗi mùa
+SPY×FAMILY S3                                26
+Lúc đó tôi đã chuyển sinh thành Slime S2/S3  25 / 24
+```
+
+Kiểm DB: `title_romaji ilike '%shingeki%'` → **0**. Tên tiếng Việt **không có** trên
+AniList, và nhiều video cũ không có tên gốc trong mô tả ⇒ hết đường ghép.
+
+**Cầu nối duy nhất, miễn phí:** TMDB search theo **tên Việt** (`language=vi-VN`)
+→ `original_name` (tiếng Nhật) → AniList search theo tên Nhật.
+
+```bash
+python3 -m ingest.main alias          # mặc định 80 tên đứng đầu (nhiều video nhất)
+```
+
+```
+▶ Job K — tên tiếng Việt → bộ trong DB (TMDB → AniList)
+  · 51 tên chưa ghép cần thử
+  [1/51] Đại chiến người Khổng Lồ S3   → Shingeki no Kyojin Season 3 (anilist 99147, mùa 3)
+  ⚠ 12 tên KHÔNG ghép được (để nguyên, không đoán bừa):
+      - BlazBlue - Mặc Khải  (TMDB không khớp, điểm 0.41)
+  ✓ 78 tên Việt đã ghi vào anime_alias
+```
+
+Chi tiết:
+
+- Số mùa đọc từ chính tên trên kênh (`youtube.season_from_vn`: "S3", "Mùa 2",
+  "Season 4") ⇒ chọn đúng entry AniList mùa 3, không phải mùa 1.
+- `max_episode` (cột mới của `ingest_unmatched`) là số tập LỚN NHẤT thấy trong
+  tiêu đề ⇒ phân biệt bộ 25 tập và bộ 12 tập cùng tên.
+- Kết quả ghi vào bảng **`anime_alias`** (`anime_id`, `alias`, `alias_key`,
+  `source='tmdb_vi'`), unique theo `(anime_id, alias_key)`. Job C dựng chỉ mục tên
+  từ bảng này ⇒ **các lần chạy sau ghép được ngay**, không phải search lại.
+- Không ghép được thì in lý do (`TMDB không khớp, điểm x`, `AniList: …`) và
+  **không ghi gì** — thà thiếu còn hơn gán bừa.
+- Chạy tự động: trong `all` và trong cron 20:40 (**trước** `youtube` để alias có
+  tác dụng ngay trong cùng lượt).
+
 ## Ba lỗi tìm ra sau lần chạy đầu tiên của bảng `ingest_unmatched` (03/11/2026)
 
 ### 1. Không nhớ kết quả ÂM → job chạy hàng giờ rồi vẫn 0 link

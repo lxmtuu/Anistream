@@ -132,7 +132,7 @@ class TestLinkRowsDungMoTa(unittest.TestCase):
             return None, 0.3, "không khớp"
 
         with patch.object(match, "resolve_series", side_effect=fake_resolve):
-            rows, links, unmatched, _, _cs = ingest_main._link_rows(
+            rows, links, unmatched, _, _cs, _mx = ingest_main._link_rows(
                 db, [v], {}, verbose=False)
         self.assertEqual(unmatched, {})
         self.assertEqual(len(links), 1)
@@ -146,7 +146,7 @@ class TestLinkRowsDungMoTa(unittest.TestCase):
         db = FakeDB()
         with patch.object(match, "resolve_series",
                           return_value=(media(888, "Bộ Lạ", 12), 1.0, "khớp")):
-            _, links, _, review, _cs = ingest_main._link_rows(db, [v], {}, verbose=False)
+            _, links, _, review, _cs, _mx = ingest_main._link_rows(db, [v], {}, verbose=False)
         self.assertEqual(links, [])
         self.assertEqual(len(review), 1)
 

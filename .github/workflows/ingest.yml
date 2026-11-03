@@ -93,6 +93,11 @@ jobs:
           python -m ingest.main tmdb --refresh --limit-tmdb 200
           python -m ingest.main seasons --limit-seasons 120
           python -m ingest.main episodes
+          # Job K: tên tiếng Việt trên kênh → bộ trong DB (TMDB original_name →
+          # AniList). Đo 03/11/2026: 51 tên / 601 video không vào được DB vì tên
+          # Việt không có trên AniList. Chạy TRƯỚC job C để alias có tác dụng ngay.
+          python -m ingest.main alias
+          python -m ingest.main youtube
           # Job I: ẩn/hiện bộ theo NỘI DUNG thật. Trước đây chỉ chạy trong
           # `all` nên cron này bỏ quên ⇒ bộ 0 tập/0 video (trang trắng) vẫn hiện.
           python -m ingest.main publish

@@ -145,7 +145,7 @@ class TestLinkRowsDungChiMuc(unittest.TestCase):
                           side_effect=AssertionError("không được gọi AniList")), \
              patch.object(ingest_main, "_upsert_media",
                           side_effect=AssertionError("không được ghi lại hồ sơ")):
-            rows, links, unmatched, review, _cs = ingest_main._link_rows(
+            rows, links, unmatched, review, _cs, _mx = ingest_main._link_rows(
                 db, videos, {}, verbose=False)
         self.assertEqual(unmatched, {})
         self.assertEqual([l["episode_number"] for l in links], [3, 4])
@@ -156,7 +156,7 @@ class TestLinkRowsDungChiMuc(unittest.TestCase):
         db = FakeDB([anime(1, 111, title_vi="Đám Cưới Đom Đóm", episodes_total=12)])
         videos = [video("Đám Cưới Đom Đóm", 13)]
         with patch.object(match, "resolve_series", side_effect=AssertionError):
-            _, links, _, review, _cs = ingest_main._link_rows(db, videos, {}, verbose=False)
+            _, links, _, review, _cs, _mx = ingest_main._link_rows(db, videos, {}, verbose=False)
         self.assertEqual(links, [], "tập 13 > 12 tập ⇒ không ghi")
         self.assertEqual(len(review), 1)
 
@@ -170,7 +170,7 @@ class TestLinkRowsDungChiMuc(unittest.TestCase):
              patch.object(match, "_ALIASES", {"fairy tail": 6702}), \
              patch.object(ingest_main, "_upsert_media",
                           return_value=([{"id": 7}], {999: 7})):
-            _, links, unmatched, _, _cs = ingest_main._link_rows(db, videos, {}, verbose=False)
+            _, links, unmatched, _, _cs, _mx = ingest_main._link_rows(db, videos, {}, verbose=False)
         self.assertEqual(unmatched, {})
         self.assertEqual(links[0]["anime_id"], 7)
 
@@ -192,7 +192,7 @@ class TestVuotTongTapGopTheoBo(unittest.TestCase):
         db = FakeDB([anime(1, 111, title_vi="DAN DA DAN", episodes_total=12)])
         videos = [video("DAN DA DAN", n) for n in (13, 14, 15, 16)]
         with patch.object(match, "resolve_series", side_effect=AssertionError):
-            _, links, _, review, can_soat = ingest_main._link_rows(
+            _, links, _, review, can_soat, _mx = ingest_main._link_rows(
                 db, videos, {}, verbose=False)
         self.assertEqual(links, [])
         self.assertEqual(review, {"DAN DA DAN": 4}, "1 dòng cho cả bộ, không 4 dòng")

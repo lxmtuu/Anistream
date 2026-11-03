@@ -212,6 +212,33 @@ def tieu_de_phu(description: str, toi_da: int = 4) -> List[str]:
     return out
 
 
+def season_from_vn(name: str) -> Optional[int]:
+    """Số mùa trong TÊN TIẾNG VIỆT của Muse VN: "… S3", "… Mùa 2", "… Phần 2".
+
+    Dùng cho job K (tên Việt → TMDB → AniList): phải biết tên này là mùa thứ mấy
+    mới chọn đúng entry AniList, vì AniList tách mỗi mùa thành một entry.
+    """
+    m = RE_SEASON.search(_norm(name))
+    if not m:
+        return None
+    g = m.group("paren") or m.groupdict().get("short") or m.group("word")
+    try:
+        n = int(g)
+    except (TypeError, ValueError):
+        return None
+    return n if 1 <= n <= 30 else None
+
+
+def base_from_vn(name: str) -> str:
+    """Tên Việt đã bỏ hậu tố mùa — dùng để search TMDB khi tên đầy đủ trượt."""
+    out = RE_SEASON.sub(" ", _norm(name))
+    # CHỈ cắt dấu phân cách ở hai ĐẦU — giữ ":" bên trong ("Re:Zero").
+    out = re.sub(r"^[\s\-–—:|]+", "", out)
+    out = re.sub(r"[\s\-–—:|]+$", "", out)
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    return out or (name or "").strip()
+
+
 def fetch_rss(channel_id: str, limit: int = 25) -> List[Dict]:
     """RSS chính thức của YouTube — không cần API key."""
     url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"

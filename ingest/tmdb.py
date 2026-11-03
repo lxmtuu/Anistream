@@ -1003,6 +1003,41 @@ def match_anime(
     return None, 0.0, "+".join(tried) or "—"
 
 
+def find_vietnamese(name: str, language: str = "vi-VN",
+                    threshold: float = 0.60) -> Tuple[Optional[Dict[str, Any]], float]:
+    """Tìm series trên TMDB bằng **tên tiếng Việt** (Muse VN dùng trong tiêu đề).
+
+    Vì sao cần (03/11/2026): tiêu đề Muse VN là tiếng Việt ("Đại chiến người
+    Khổng Lồ", "Thất hình đại tội") và những tên này KHÔNG có trong AniList. TMDB
+    có bản dịch tiếng Việt + `original_name` (tiếng Nhật) ⇒ đây là cầu nối duy
+    nhất từ tên Việt sang AniList, không cần API trả phí.
+
+    Ngưỡng mặc định 0.60 (thấp hơn `TITLE_THRESHOLD` của job D có chủ ý): tên
+    Việt trên kênh hay viết hoa/thiếu dấu khác bản dịch chính thức, nhưng vẫn
+    phải khớp kha khá — trả `(None, điểm)` để job in ra lý do, không đoán bừa.
+    """
+    res = _get("/search/tv", {"query": name, "language": language, "include_adult": "false"})
+    best: Optional[Dict[str, Any]] = None
+    best_score = 0.0
+    for r in res.get("results") or []:
+        sc = max(similarity(name, r.get("name") or ""),
+                 similarity(name, r.get("original_name") or ""))
+        if sc > best_score:
+            best, best_score = r, sc
+    if best is None or best_score < threshold:
+        return None, round(best_score, 3)
+    return best, round(best_score, 3)
+
+
+def english_title(detail: Dict[str, Any]) -> Optional[str]:
+    """Tên tiếng Anh từ `translations` của TMDB detail (đã có sẵn append)."""
+    for t in ((detail.get("translations") or {}).get("translations") or []):
+        if (t.get("iso_639_1") or "") == "en":
+            data = t.get("data") or {}
+            return data.get("name") or data.get("title") or None
+    return detail.get("name") or None
+
+
 def fetch_detail(tv_id: int) -> Dict[str, Any]:
     d = _get(f"/tv/{tv_id}", {"append_to_response": "alternative_titles,translations"})
     time.sleep(SLEEP_BETWEEN)
