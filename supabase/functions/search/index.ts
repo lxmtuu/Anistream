@@ -111,7 +111,7 @@ Deno.serve(
         selectAll<LinkRow>((from, to) =>
           sb
             .from("streaming_links")
-            .select("anime_id, episode_number, platform, region, url, kind, is_verified")
+            .select("anime_id, episode_number, platform, region, url, kind, is_verified, source_title")
             .in("anime_id", ids)
             .eq("is_verified", true)
             .order("anime_id", { ascending: true })

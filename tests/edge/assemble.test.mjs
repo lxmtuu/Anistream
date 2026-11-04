@@ -25,6 +25,7 @@ function link(episode, vid = VID) {
   return {
     anime_id: 1, episode_number: episode, platform: "youtube", region: "VN",
     url: `https://www.youtube.com/watch?v=${vid}`, kind: "free_legal", is_verified: true,
+    source_title: null,
   };
 }
 
@@ -65,6 +66,18 @@ test("không có link cho cả bộ → không tự sinh entry 0", () => {
 test("is_free = có link free_legal đã verify", () => {
   assert.equal(toAnimeDto(ROW, [], [link(1)]).is_free, true);
   assert.equal(toAnimeDto(ROW, [], []).is_free, false);
+});
+
+test("cùng tập giữ lựa chọn Vietsub + lồng tiếng, mặc định Vietsub", () => {
+  const sub = { ...link(1, "VVVVVVVVVVV"), source_title: "Slime - Tập 92 [Việt sub]" };
+  const dub = { ...link(1, "DDDDDDDDDDD"), source_title: "[Bản Lồng Tiếng] Slime - Tập 92" };
+  const dto = toAnimeDto(ROW,
+    [{ anime_id: 1, number: 1, title: "", airing_at: null }], [dub, sub]);
+  const episode = dto.episodes[0];
+  assert.equal(episode.video_id, "VVVVVVVVVVV", "Vietsub làm lựa chọn mặc định");
+  assert.deepEqual(episode.video_options.map((o) => o.label), ["Vietsub", "Lồng tiếng"]);
+  assert.deepEqual(episode.video_options.map((o) => o.video_id),
+    ["VVVVVVVVVVV", "DDDDDDDDDDD"]);
 });
 
 test("cùng 1 tập có bản VN và bản AS → ưu tiên VN (không phụ thuộc thứ tự DB)", () => {

@@ -92,7 +92,7 @@ Deno.serve(
     if (ids.length > 0) {
       const { data: links } = await sb
         .from("streaming_links")
-        .select("anime_id, episode_number, platform, url, kind, is_verified")
+        .select("anime_id, episode_number, platform, url, kind, is_verified, source_title")
         .in("anime_id", ids)
         .eq("kind", "free_legal")
         .eq("is_verified", true)

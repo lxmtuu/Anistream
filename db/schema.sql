@@ -99,9 +99,12 @@ create table if not exists streaming_links (
   kind           text not null default 'official',      -- official|trailer|free_legal
   is_verified    boolean not null default false,
   verified_at    timestamptz,
-  created_at     timestamptz not null default now(),
-  unique (anime_id, platform, region, episode_number)
+  source_title   text,                                  -- tiêu đề YouTube gốc (phân biệt Vietsub/lồng tiếng)
+  created_at     timestamptz not null default now()
 );
+-- tra tập nhanh; KHÔNG unique vì một tập có thể có nhiều video official (vd Vietsub + lồng tiếng).
+create index if not exists streaming_links_episode_lookup_idx
+  on streaming_links (anime_id, episode_number, platform, region);
 -- chống trùng cùng 1 video được gán 2 lần
 create unique index if not exists streaming_links_url_uidx
   on streaming_links (platform, url);

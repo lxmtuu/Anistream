@@ -81,6 +81,66 @@ class DetailScreen extends ConsumerWidget {
   }
 }
 
+Future<void> _playEpisode(
+  BuildContext context,
+  Anime anime,
+  Episode episode,
+) async {
+  final choices = episode.videoOptions.isNotEmpty
+      ? episode.videoOptions
+      : [
+          EpisodeVideoOption(
+            videoId: episode.videoId!,
+            platform: episode.platform ?? 'YouTube',
+            label: 'Phát video',
+          ),
+        ];
+  var selected = choices.first;
+  if (choices.length > 1) {
+    final choice = await showModalBottomSheet<EpisodeVideoOption>(
+      context: context,
+      backgroundColor: AppTheme.surface2,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Chọn bản phát',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.text,
+                ),
+              ),
+            ),
+            for (final option in choices)
+              ListTile(
+                leading: const Icon(Icons.play_circle_outline, color: AppTheme.accent),
+                title: Text(
+                  option.label,
+                  style: const TextStyle(color: AppTheme.text),
+                ),
+                subtitle: Text(
+                  option.platform,
+                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                ),
+                onTap: () => Navigator.of(sheetContext).pop(option),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !context.mounted) return;
+    selected = choice;
+  }
+  final title =
+      '${anime.displayTitle} · Tập ${episode.number} · ${selected.label}';
+  context.push(
+    '/watch?video=${selected.videoId}&title=${Uri.encodeComponent(title)}',
+  );
+}
+
 class _DetailBody extends ConsumerWidget {
   final Anime anime;
   const _DetailBody({required this.anime});
@@ -365,9 +425,7 @@ class _DetailBody extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(9),
                 onTap: () {
                   if (e.playable) {
-                    context.push(
-                      '/watch?video=${e.videoId}&title=${Uri.encodeComponent('${anime.displayTitle} · Tập ${e.number}')}',
-                    );
+                    _playEpisode(context, anime, e);
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -422,6 +480,13 @@ class _DetailBody extends ConsumerWidget {
                               color: AppTheme.muted,
                             ),
                           ),
+                        ),
+                      if (e.videoOptions.length > 1)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text('${e.videoOptions.length} bản',
+                              style: const TextStyle(
+                                  fontSize: 8.5, color: AppTheme.muted)),
                         ),
                       if (e.playable)
                         const Padding(
