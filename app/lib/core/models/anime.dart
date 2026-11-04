@@ -1,12 +1,32 @@
 // Model dữ liệu. Không dùng freezed/build_runner ở v1 để bạn `flutter pub get`
 // là chạy được ngay, không cần chạy codegen.
 
+class EpisodeVideoOption {
+  final String videoId;
+  final String platform;
+  final String label;
+
+  const EpisodeVideoOption({
+    required this.videoId,
+    required this.platform,
+    required this.label,
+  });
+
+  factory EpisodeVideoOption.fromJson(Map<String, dynamic> j) =>
+      EpisodeVideoOption(
+        videoId: (j['video_id'] as String?) ?? '',
+        platform: (j['platform'] as String?) ?? 'YouTube',
+        label: (j['label'] as String?) ?? 'YouTube',
+      );
+}
+
 class Episode {
   final int number;
   final String title;
   final String? videoId; // != null → phát được trong app (video official, cho nhúng)
   final String? platform;
   final DateTime? airingAt;
+  final List<EpisodeVideoOption> videoOptions;
 
   const Episode({
     required this.number,
@@ -14,6 +34,7 @@ class Episode {
     this.videoId,
     this.platform,
     this.airingAt,
+    this.videoOptions = const [],
   });
 
   bool get playable => videoId != null && videoId!.isNotEmpty;
@@ -24,6 +45,11 @@ class Episode {
         videoId: j['video_id'] as String?,
         platform: j['platform'] as String?,
         airingAt: DateTime.tryParse((j['airing_at'] as String?) ?? '')?.toLocal(),
+        videoOptions: (j['video_options'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(EpisodeVideoOption.fromJson)
+            .where((v) => v.videoId.isNotEmpty)
+            .toList(),
       );
 }
 

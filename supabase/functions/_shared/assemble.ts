@@ -47,6 +47,13 @@ export interface LinkRow {
   url: string;
   kind: string;
   is_verified: boolean;
+  source_title?: string | null;
+}
+
+export interface EpisodeVideoOptionDto {
+  video_id: string;
+  platform: string;
+  label: string;
 }
 
 export interface PlatformDto {
@@ -61,6 +68,7 @@ export interface EpisodeDto {
   video_id: string | null;
   platform: string | null;
   airing_at: string | null;
+  video_options: EpisodeVideoOptionDto[];
 }
 
 export interface AnimeDto {
@@ -125,19 +133,38 @@ export function toAnimeDto(
   const freeLinks = verified.filter((l) => l.kind === "free_legal");
   const officialLinks = verified.filter((l) => l.kind === "official");
 
-  // video_id theo số tập (0 = full bộ).
-  // Thứ tự `links` do PostgREST trả về KHÔNG xác định → nếu một tập có cả bản VN
-  // và bản Asia (Ani-One), ai "thắng" là ngẫu nhiên. Ưu tiên region VN trước.
+  // Mỗi video official là một URL riêng. Một tập có thể có nhiều bản (vd Vietsub
+  // và lồng tiếng); ưu tiên VN, Vietsub rồi video có source_title rõ ràng làm mặc định,
+  // nhưng giữ TẤT CẢ lựa chọn để trang chi tiết không làm video nào bị ẩn.
   const regionRank = (r?: string | null) => (r === "VN" ? 0 : r === "AS" ? 1 : 2);
-  const orderedFree = [...freeLinks].sort(
-    (a, b) => regionRank(a.region) - regionRank(b.region),
+  const versionRank = (title?: string | null) => {
+    const t = (title ?? "").toLowerCase();
+    if (/lồng\s*tiếng|dub/.test(t)) return 1;
+    if (/viet\s*sub|việt\s*sub|phụ\s*đề/.test(t)) return 0;
+    return 2;
+  };
+  const orderedFree = [...freeLinks].sort((a, b) =>
+    regionRank(a.region) - regionRank(b.region)
+      || versionRank(a.source_title) - versionRank(b.source_title)
+      || (a.url ?? "").localeCompare(b.url ?? ""),
   );
-  const videoByEpisode = new Map<number, { id: string; platform: string }>();
+  const optionsByEpisode = new Map<number, EpisodeVideoOptionDto[]>();
   for (const l of orderedFree) {
     const vid = l.platform === "youtube" ? youtubeId(l.url) : null;
-    if (vid && !videoByEpisode.has(l.episode_number)) {
-      videoByEpisode.set(l.episode_number, { id: vid, platform: l.platform });
+    if (!vid) continue;
+    const t = (l.source_title ?? "").toLowerCase();
+    const label = /lồng\s*tiếng|dub/.test(t) ? "Lồng tiếng"
+      : /viet\s*sub|việt\s*sub|phụ\s*đề/.test(t) ? "Vietsub"
+      : platformLabel(l.platform);
+    const options = optionsByEpisode.get(l.episode_number) ?? [];
+    if (!options.some((o) => o.video_id === vid)) {
+      options.push({ video_id: vid, platform: l.platform, label });
+      optionsByEpisode.set(l.episode_number, options);
     }
+  }
+  const videoByEpisode = new Map<number, EpisodeVideoOptionDto>();
+  for (const [number, options] of optionsByEpisode) {
+    if (options[0]) videoByEpisode.set(number, options[0]);
   }
 
   const eps: EpisodeDto[] = episodes.map((e) => {
@@ -145,9 +172,10 @@ export function toAnimeDto(
     return {
       number: e.number,
       title: e.title ?? "",
-      video_id: v?.id ?? null,
+      video_id: v?.video_id ?? null,
       platform: v?.platform ?? null,
       airing_at: e.airing_at,
+      video_options: optionsByEpisode.get(e.number) ?? [],
     };
   });
 
@@ -156,7 +184,8 @@ export function toAnimeDto(
   const existingEpisodes = new Set(eps.map((e) => e.number));
   for (const [number, v] of videoByEpisode) {
     if (number > 0 && !existingEpisodes.has(number)) {
-      eps.push({ number, title: "", video_id: v.id, platform: v.platform, airing_at: null });
+      eps.push({ number, title: "", video_id: v.video_id, platform: v.platform,
+        airing_at: null, video_options: optionsByEpisode.get(number) ?? [] });
     }
   }
   eps.sort((a, b) => a.number - b.number);
@@ -170,9 +199,10 @@ export function toAnimeDto(
     eps.push({
       number: 0,
       title: "Cả bộ",
-      video_id: v.id,
+      video_id: v.video_id,
       platform: v.platform,
       airing_at: null,
+      video_options: optionsByEpisode.get(0) ?? [],
     });
   }
 
