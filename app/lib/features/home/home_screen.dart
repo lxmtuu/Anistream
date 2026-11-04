@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/theme.dart';
 import '../../core/models/anime.dart';
 import '../../core/models/home_feed.dart';
+import '../../core/widgets/episode_video_picker.dart';
 import '../../core/widgets/net_image.dart';
 import '../../core/widgets/shelf.dart';
 import '../../data/anime_repository.dart';
@@ -172,9 +173,7 @@ class _Hero extends StatelessWidget {
                       onPressed: () {
                         final ep = anime.firstPlayable;
                         if (ep != null) {
-                          context.push(
-                            '/watch?video=${ep.videoId}&title=${Uri.encodeComponent(anime.displayTitle)}',
-                          );
+                          playEpisode(context, anime, ep);
                         } else {
                           context.push('/anime/${anime.slug}');
                         }

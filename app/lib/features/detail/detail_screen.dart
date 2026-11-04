@@ -8,6 +8,7 @@ import '../../core/models/anime.dart';
 import '../../core/models/episode_count.dart';
 import '../../core/models/episode_title.dart';
 import '../../core/models/genre_vi.dart';
+import '../../core/widgets/episode_video_picker.dart';
 import '../../core/widgets/net_image.dart';
 import '../../data/anime_repository.dart';
 
@@ -79,66 +80,6 @@ class DetailScreen extends ConsumerWidget {
       ),
     );
   }
-}
-
-Future<void> _playEpisode(
-  BuildContext context,
-  Anime anime,
-  Episode episode,
-) async {
-  final choices = episode.videoOptions.isNotEmpty
-      ? episode.videoOptions
-      : [
-          EpisodeVideoOption(
-            videoId: episode.videoId!,
-            platform: episode.platform ?? 'YouTube',
-            label: 'Phát video',
-          ),
-        ];
-  var selected = choices.first;
-  if (choices.length > 1) {
-    final choice = await showModalBottomSheet<EpisodeVideoOption>(
-      context: context,
-      backgroundColor: AppTheme.surface2,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Chọn bản phát',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.text,
-                ),
-              ),
-            ),
-            for (final option in choices)
-              ListTile(
-                leading: const Icon(Icons.play_circle_outline, color: AppTheme.accent),
-                title: Text(
-                  option.label,
-                  style: const TextStyle(color: AppTheme.text),
-                ),
-                subtitle: Text(
-                  option.platform,
-                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
-                ),
-                onTap: () => Navigator.of(sheetContext).pop(option),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (choice == null || !context.mounted) return;
-    selected = choice;
-  }
-  final title =
-      '${anime.displayTitle} · Tập ${episode.number} · ${selected.label}';
-  context.push(
-    '/watch?video=${selected.videoId}&title=${Uri.encodeComponent(title)}',
-  );
 }
 
 class _DetailBody extends ConsumerWidget {
@@ -278,9 +219,7 @@ class _DetailBody extends ConsumerWidget {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
-                      onPressed: () => context.push(
-                        '/watch?video=${ep.videoId}&title=${Uri.encodeComponent(anime.displayTitle)}',
-                      ),
+                      onPressed: () => playEpisode(context, anime, ep),
                       icon: const Icon(Icons.play_arrow_rounded),
                       label: Text(ep.number == 0
                           ? 'Xem cả bộ · miễn phí'
@@ -425,7 +364,7 @@ class _DetailBody extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(9),
                 onTap: () {
                   if (e.playable) {
-                    _playEpisode(context, anime, e);
+                    playEpisode(context, anime, e);
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
